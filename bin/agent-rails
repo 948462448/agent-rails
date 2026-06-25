@@ -6,14 +6,22 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 export AGENT_RAILS_HOME
+# shellcheck source=scripts/agent-paths.sh
+source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+agent_rails_init_paths
+AGENT_RAILS_VERSION="$(agent_rails_version)"
+export AGENT_RAILS_VERSION
 
 usage() {
   cat <<'USAGE'
 Usage:
+  agent-rails --version
+  agent-rails version
   agent-rails init [--shell zsh|bash|fish] [--project PATH] [--profile PATH]
   agent-rails pack [--project PATH] [agent-context-pack args...]
   agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [goal text...]
   agent-rails check [--project PATH] [agent-check args...]
+  agent-rails publish check [--project PATH] [--profile PATH] [--base REF] [--target-ref REF] [--no-secret-scan]
   agent-rails estimate [--profile PATH] [--model NAME] [--tokenizer auto|char|tiktoken|command] [--file PATH] [text...]
   agent-rails eval init|record|report [eval args...]
   agent-rails doctor [--project PATH] [--profile PATH] [--openmemory-smoke]
@@ -26,12 +34,14 @@ Usage:
   agent-rails home
 
 Examples:
+  agent-rails --version
   agent-rails init
   agent-rails pack --project /path/to/project "review current changes"
   agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "review current changes"
   agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode lite "POC deploy prep"
   agent-rails pack --project /path/to/project --model qwen3.7-max --pack-mode deep "review current changes"
   agent-rails check --project /path/to/project --print-only
+  agent-rails publish check --project /path/to/project
   agent-rails estimate --model glm5.1 --tokenizer char --file /path/to/task-pack.md
   agent-rails eval init --dir evals
   agent-rails eval record --task evals/tasks/sample.yaml --mode agentrails
@@ -51,6 +61,11 @@ USAGE
 }
 
 command="${1:-}"
+if [[ "$command" == "--version" || "$command" == "version" ]]; then
+  printf 'agent-rails %s\n' "$AGENT_RAILS_VERSION"
+  exit 0
+fi
+
 if [[ -z "$command" || "$command" == "--help" || "$command" == "-h" ]]; then
   usage
   exit 0
@@ -78,7 +93,11 @@ run_in_project() {
   done
 
   cd "$project"
-  "$AGENT_RAILS_HOME/scripts/$script" "${args[@]}"
+  if [[ "${#args[@]}" -gt 0 ]]; then
+    "$AGENT_RAILS_HOME/scripts/$script" "${args[@]}"
+  else
+    "$AGENT_RAILS_HOME/scripts/$script"
+  fi
 }
 
 case "$command" in
@@ -93,6 +112,22 @@ case "$command" in
     ;;
   check)
     run_in_project agent-check.sh "$@"
+    ;;
+  publish)
+    subcommand="${1:-}"
+    case "$subcommand" in
+      check)
+        shift
+        run_in_project agent-publish-check.sh "$@"
+        ;;
+      ""|--help|-h)
+        "$AGENT_RAILS_HOME/scripts/agent-publish-check.sh" --help
+        ;;
+      *)
+        usage >&2
+        exit 2
+        ;;
+    esac
     ;;
   estimate)
     "$AGENT_RAILS_HOME/scripts/agent-estimate.sh" "$@"

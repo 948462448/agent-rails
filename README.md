@@ -4,13 +4,21 @@ Agent Rails 是一个个人本地工程化辅助 kit，用来给 Claude Code / C
 
 它不应该作为业务仓库的共享规范提交；业务仓库只是 `--project` 指向的 target project。
 
+当前版本可用下面命令查看：
+
+```bash
+bin/agent-rails --version
+```
+
 ## Layout
 
 ```text
+VERSION                         # Agent Rails kit 版本单一来源
 bin/agent-rails                 # CLI 入口
 scripts/agent-context-pack.sh   # 生成 Task Pack
 scripts/agent-run.sh            # 串起 pack/estimate/check/memory curator 的本地 wrapper
 scripts/agent-check.sh          # 根据 diff 选择验证命令
+scripts/agent-publish-check.sh  # 发布/推送前汇总 scope、secret scan 和验证建议
 scripts/agent-eval.sh           # 初始化评测集、记录 JSONL、生成报告
 scripts/agent-estimate.sh       # 估算字符数和近似 token 数
 scripts/agent-doctor.sh         # 诊断项目接入状态
@@ -67,6 +75,15 @@ agent-rails run \
 ```
 
 `run` 会生成 Task Pack、估算大小，并打印 agent 应该读取 Task Pack、执行检查、结束后运行 memory curator 的指令。它不硬控制 Claude/Codex 内核，只是把本地工作流变成一个稳定入口。对重构、迁移、架构、诊断、review 这类任务，如果你没有显式传 `--pack-mode`，`run` 会自动升到 `deep`。
+
+发布或 push 前可以跑轻量检查：
+
+```bash
+agent-rails publish check \
+  --project /path/to/project
+```
+
+它会汇总当前分支相对 base 的文件范围、staged/unstaged/untracked 状态、潜在 secret 命中（输出会打码），并嵌入 `agent-rails check` 的验证建议。这个命令只读，不会 stage、commit 或 push。
 
 可以先估算任意文件或文本的近似 token：
 
@@ -290,6 +307,20 @@ agent-rails claude upgrade \
   --global-reminder \
   --session-hook
 ```
+
+版本更新流程：
+
+```bash
+cd /Users/songlei/workspace/agent-rails
+git pull origin main
+agent-rails --version
+bash tests/run.sh
+agent-rails doctor --project /path/to/project --profile /path/to/profile
+agent-rails claude upgrade --project /path/to/project --profile /path/to/profile --mode local --session-hook
+agent-rails skills install --dest /path/to/project/.claude/skills
+```
+
+`VERSION` 是 kit 版本的单一来源；Claude/Codex plugin manifest 应与它保持一致。`claude install/upgrade` 会把版本写入项目 adapter，`doctor` 会提示 adapter 或 plugin manifest 版本落后。
 
 卸载前可先预览：
 

@@ -18,6 +18,7 @@ AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
 agent_rails_init_paths
+AGENT_RAILS_VERSION="$(agent_rails_version)"
 
 project="$PWD"
 profile_path=""
@@ -77,6 +78,38 @@ command_status() {
   else
     warn "command missing: $command_name"
   fi
+}
+
+read_manifest_version() {
+  local manifest_path="$1"
+  [[ -f "$manifest_path" ]] || return 1
+  sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$manifest_path" | head -n 1
+}
+
+check_manifest_version() {
+  local label="$1"
+  local manifest_path="$2"
+  local manifest_version
+  if [[ ! -f "$manifest_path" ]]; then
+    warn "$label manifest missing: $manifest_path"
+    return 0
+  fi
+  manifest_version="$(read_manifest_version "$manifest_path" || true)"
+  if [[ -z "$manifest_version" ]]; then
+    warn "$label manifest has no version: $manifest_path"
+  elif [[ "$manifest_version" == "$AGENT_RAILS_VERSION" ]]; then
+    ok "$label manifest version: $manifest_version"
+  else
+    warn "$label manifest version $manifest_version differs from kit version $AGENT_RAILS_VERSION."
+  fi
+}
+
+read_adapter_version() {
+  local path
+  for path in "$guide_path" "$claude_local_md_path" "$claude_project_md_path"; do
+    [[ -f "$path" ]] || continue
+    sed -nE 's/^Agent Rails Version:[[:space:]]*`?([^`[:space:]]+)`?.*/\1/p' "$path" | head -n 1
+  done | awk 'NF { print; exit }'
 }
 
 resolve_profile() {
@@ -210,6 +243,7 @@ if [[ -x "$AGENT_RAILS_BIN" ]]; then
 else
   fail "Agent Rails CLI is not executable: $AGENT_RAILS_BIN"
 fi
+ok "Kit version: $AGENT_RAILS_VERSION"
 
 if [[ ! -d "$project" ]]; then
   fail "project directory not found: $project"
@@ -304,6 +338,11 @@ if provider_uses_openmemory; then
   command_status jq
 fi
 
+printf '\nPlugin Manifests\n'
+check_manifest_version "Codex plugin" "$AGENT_RAILS_HOME/.codex-plugin/plugin.json"
+check_manifest_version "Claude plugin" "$AGENT_RAILS_HOME/.claude-plugin/plugin.json"
+check_manifest_version "Codex marketplace plugin" "$AGENT_RAILS_HOME/codex-marketplace/plugins/agent-rails/.codex-plugin/plugin.json"
+
 printf '\nOpenMemory\n'
 if provider_uses_openmemory; then
   ok "Memory provider: $MEMORY_PROVIDER"
@@ -345,6 +384,7 @@ claude_project_md_path="$project_abs/CLAUDE.md"
 claude_local_md_path="$project_abs/CLAUDE.local.md"
 claude_settings_path="${AGENT_RAILS_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 session_hook_path="$AGENT_RAILS_HOME/hooks/agent-rails-session-start.sh"
+adapter_version="$(read_adapter_version)"
 
 [[ -f "$guide_path" ]] && ok "Claude guide installed: $guide_path" || warn "Missing Claude guide: $guide_path"
 [[ -f "$pack_command_path" ]] && ok "Claude pack command installed." || warn "Missing Claude pack command: $pack_command_path"
@@ -356,6 +396,15 @@ elif [[ -f "$claude_project_md_path" ]] && grep -q '<!-- agent-rails:start -->' 
   ok "CLAUDE.md contains Agent Rails block."
 else
   warn "CLAUDE.local.md/CLAUDE.md Agent Rails block is missing."
+fi
+if [[ -n "$adapter_version" ]]; then
+  if [[ "$adapter_version" == "$AGENT_RAILS_VERSION" ]]; then
+    ok "Claude adapter version: $adapter_version"
+  else
+    warn "Claude adapter version $adapter_version differs from kit version $AGENT_RAILS_VERSION; run claude upgrade."
+  fi
+elif [[ -f "$guide_path" || -f "$claude_local_md_path" || -f "$claude_project_md_path" ]]; then
+  warn "Claude adapter version missing; run claude upgrade."
 fi
 
 if [[ -f "$guide_path" ]] && ! grep -Fq "$profile_path" "$guide_path"; then

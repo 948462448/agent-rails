@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENT_RAILS_BIN="$ROOT_DIR/bin/agent-rails"
+EXPECTED_AGENT_RAILS_VERSION="$(awk 'NF { print $1; exit }' "$ROOT_DIR/VERSION")"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agent-rails-tests.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -19,6 +20,16 @@ assert_contains() {
   local needle="$2"
   if [[ "$haystack" != *"$needle"* ]]; then
     printf 'Expected output to contain: %s\n' "$needle" >&2
+    printf 'Actual output:\n%s\n' "$haystack" >&2
+    exit 1
+  fi
+}
+
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    printf 'Expected output not to contain: %s\n' "$needle" >&2
     printf 'Actual output:\n%s\n' "$haystack" >&2
     exit 1
   fi
@@ -67,6 +78,22 @@ test_init_prints_shell_setup() {
   assert_contains "$output" 'ar doctor --project "$OPEN_EVAL_HOME" --profile "$OPEN_EVAL_PROFILE"'
 }
 
+test_version_command_reads_version_file() {
+  local output
+
+  output="$("$AGENT_RAILS_BIN" --version)"
+  assert_contains "$output" "agent-rails $EXPECTED_AGENT_RAILS_VERSION"
+
+  output="$("$AGENT_RAILS_BIN" version)"
+  assert_contains "$output" "agent-rails $EXPECTED_AGENT_RAILS_VERSION"
+}
+
+test_plugin_manifests_match_version_file() {
+  assert_file_contains "$ROOT_DIR/.codex-plugin/plugin.json" "\"version\": \"$EXPECTED_AGENT_RAILS_VERSION\""
+  assert_file_contains "$ROOT_DIR/.claude-plugin/plugin.json" "\"version\": \"$EXPECTED_AGENT_RAILS_VERSION\""
+  assert_file_contains "$ROOT_DIR/codex-marketplace/plugins/agent-rails/.codex-plugin/plugin.json" "\"version\": \"$EXPECTED_AGENT_RAILS_VERSION\""
+}
+
 test_agent_check_includes_bin_entrypoint() {
   local repo="$TMP_ROOT/check-bin"
   local output
@@ -106,6 +133,40 @@ PROFILE
     printf 'agent-check should not run verification through eval.\n' >&2
     exit 1
   fi
+}
+
+test_publish_check_summarizes_scope_and_redacts_secrets() {
+  local repo="$TMP_ROOT/publish-check"
+  local output
+  mkdir -p "$repo/scripts"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  printf '#!/usr/bin/env bash\nprintf "ok\\n"\n' > "$repo/scripts/run.sh"
+  git -C "$repo" add README.md scripts/run.sh
+  git_commit "$repo" init
+
+  printf '\nprintf "changed\\n"\n' >> "$repo/scripts/run.sh"
+  git -C "$repo" add scripts/run.sh
+  printf 'OPENMEMORY_ACCESS_KEY=super-secret-value\n' > "$repo/.env.local"
+  {
+    printf 'AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base\n'
+    printf 'OPENMEMORY_TOKEN_ENV="${OPENMEMORY_TOKEN_ENV:-OPENMEMORY_ACCESS_KEY}"\n'
+  } > "$repo/tokenizer.md"
+
+  output="$("$AGENT_RAILS_BIN" publish check --project "$repo")"
+
+  assert_contains "$output" "AGENT RAILS: CHECK-ONLY (reason=publish"
+  assert_contains "$output" "Agent publish check"
+  assert_contains "$output" "Staged files (1)"
+  assert_contains "$output" "Untracked files (2)"
+  assert_contains "$output" "scripts/run.sh"
+  assert_contains "$output" ".env.local"
+  assert_contains "$output" "Potential secret matches found"
+  assert_contains "$output" "OPENMEMORY_ACCESS_KEY=<redacted>"
+  assert_not_contains "$output" "super-secret-value"
+  assert_not_contains "$output" "TIKTOKEN_ENCODING=<redacted>"
+  assert_not_contains "$output" "OPENMEMORY_TOKEN_ENV=<redacted>"
+  assert_contains "$output" "Suggested verification:"
 }
 
 test_estimate_uses_model_preset() {
@@ -566,6 +627,10 @@ test_doctor_ok_after_local_install() {
   "$AGENT_RAILS_BIN" claude install --project "$repo" --mode local >/dev/null
   output="$("$AGENT_RAILS_BIN" doctor --project "$repo")"
 
+  assert_contains "$output" "Kit version: $EXPECTED_AGENT_RAILS_VERSION"
+  assert_contains "$output" "Codex plugin manifest version: $EXPECTED_AGENT_RAILS_VERSION"
+  assert_contains "$output" "Claude plugin manifest version: $EXPECTED_AGENT_RAILS_VERSION"
+  assert_contains "$output" "Claude adapter version: $EXPECTED_AGENT_RAILS_VERSION"
   assert_contains "$output" "Agent Rails adapter files are ignored locally"
   assert_contains "$output" "skill installed: agent-grill"
   assert_contains "$output" "skill installed: agent-eval"
@@ -971,11 +1036,20 @@ test_run_uses_user_agent_rails_profile() {
 test_init_prints_shell_setup
 printf 'ok - init prints shell setup\n'
 
+test_version_command_reads_version_file
+printf 'ok - version command reads VERSION\n'
+
+test_plugin_manifests_match_version_file
+printf 'ok - plugin manifests match VERSION\n'
+
 test_agent_check_includes_bin_entrypoint
 printf 'ok - agent-check includes bin/agent-rails\n'
 
 test_agent_check_run_uses_child_shell
 printf 'ok - agent-check --run uses child shell\n'
+
+test_publish_check_summarizes_scope_and_redacts_secrets
+printf 'ok - publish check summarizes scope and redacts secrets\n'
 
 test_estimate_uses_model_preset
 printf 'ok - estimate uses model preset\n'

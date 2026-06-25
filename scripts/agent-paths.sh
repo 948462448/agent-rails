@@ -10,6 +10,21 @@ agent_rails_init_paths() {
   export AGENT_RAILS_USER_PROFILE_DIR
 }
 
+agent_rails_version() {
+  local version_file
+  if [[ -n "${AGENT_RAILS_VERSION_OVERRIDE:-}" ]]; then
+    printf '%s\n' "$AGENT_RAILS_VERSION_OVERRIDE"
+    return 0
+  fi
+
+  version_file="${AGENT_RAILS_HOME:-}/VERSION"
+  if [[ -n "${AGENT_RAILS_HOME:-}" && -f "$version_file" ]]; then
+    awk 'NF { print $1; exit }' "$version_file"
+  else
+    printf '0.0.0-dev\n'
+  fi
+}
+
 agent_rails_sanitize_slug() {
   printf '%s' "$1" | tr '[:upper:] ' '[:lower:]-' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+|-+$//g'
 }

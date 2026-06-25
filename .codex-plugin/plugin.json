@@ -1,6 +1,6 @@
 {
   "name": "agent-rails",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Personal Agent Rails task-pack, memory, and verification workflow for Codex projects.",
   "author": {
     "name": "songlei"

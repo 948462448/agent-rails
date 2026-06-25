@@ -12,10 +12,12 @@
 ## 常用命令
 
 ```bash
+bin/agent-rails --version
 bin/agent-rails pack --project /path/to/project "本次任务目标"
 bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "本次任务目标"
 bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode lite "POC / deploy prep 目标"
 bin/agent-rails check --project /path/to/project --print-only
+bin/agent-rails publish check --project /path/to/project
 bin/agent-rails estimate --model glm5.1 --tokenizer char --file /path/to/task-pack.md
 bin/agent-rails doctor --project /path/to/project --profile /path/to/profile
 bin/agent-rails doctor --project /path/to/project --profile /path/to/profile --openmemory-smoke

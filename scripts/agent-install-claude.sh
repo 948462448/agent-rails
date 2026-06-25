@@ -30,6 +30,7 @@ AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
 agent_rails_init_paths
+AGENT_RAILS_VERSION="$(agent_rails_version)"
 
 project="$PWD"
 profile_path=""
@@ -489,6 +490,8 @@ guide_content="$(cat <<EOF
 
 This project is configured to use Agent Rails for context orchestration.
 
+Agent Rails Version: $AGENT_RAILS_VERSION
+
 Before work, choose the smallest useful Agent Rails path:
 
 - Deep pack: 2+ subprojects, API/contracts/schema/data-model changes, ADR/handbook work, migrations/refactors, or ambiguous product decisions.
@@ -621,6 +624,8 @@ claude_block="$(cat <<EOF
 <!-- agent-rails:start -->
 ## Agent Rails
 
+Agent Rails Version: $AGENT_RAILS_VERSION
+
 Use Agent Rails before reading broad context or editing files when this work touches 2+ subprojects, APIs/contracts/schemas/data models, ADRs/handbooks, migrations/refactors, or ambiguous product decisions. For POCs, quick prototypes, version/Dockerfile/OSS/deploy prep, codegen freshness checks, or continuation from an existing handbook, use \`--pack-mode lite\`. Pure status queries or fixed operations with no repo change and no branch-consumption risk can skip pack.
 
 Visible session marker protocol:
@@ -713,6 +718,7 @@ fi
 
 printf '\nClaude adapter ready.\n'
 printf 'Mode: %s\n' "$install_mode"
+printf 'Version: %s\n' "$AGENT_RAILS_VERSION"
 printf 'Project: %s\n' "$project_abs"
 printf 'Profile: %s\n' "$profile_path"
 printf 'Task Pack: %s\n' "$task_pack_path"

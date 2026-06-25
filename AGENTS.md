@@ -13,6 +13,7 @@
 
 ```bash
 bin/agent-rails --version
+bin/agent-rails update --project /path/to/project --profile /path/to/profile --session-hook
 bin/agent-rails pack --project /path/to/project "本次任务目标"
 bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "本次任务目标"
 bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode lite "POC / deploy prep 目标"
@@ -20,16 +21,18 @@ bin/agent-rails check --project /path/to/project --print-only
 bin/agent-rails publish check --project /path/to/project
 bin/agent-rails estimate --model glm5.1 --tokenizer char --file /path/to/task-pack.md
 bin/agent-rails doctor --project /path/to/project --profile /path/to/profile
+bin/agent-rails doctor --project /path/to/project --profile /path/to/profile --fix
 bin/agent-rails doctor --project /path/to/project --profile /path/to/profile --openmemory-smoke
 bin/agent-rails profile init --project /path/to/project
 bin/agent-rails profile init --project /path/to/project --scope project
 bin/agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local
 bin/agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --session-hook
-bin/agent-rails claude upgrade --project /path/to/project --profile /path/to/profile --mode local
 bin/agent-rails claude uninstall --project /path/to/project --session-hook --dry-run
+bin/agent-rails codex install
+bin/agent-rails codex install --project /path/to/project --fix-project
+bin/agent-rails codex doctor --project /path/to/project
+bin/agent-rails codex uninstall --dry-run
 bin/agent-rails skills install --dest /path/to/project/.claude/skills
-codex plugin marketplace add /Users/songlei/workspace/agent-rails/codex-marketplace
-codex plugin add agent-rails@agent-rails-local
 ```
 
 如需启用在线 memory，个人配置可放在：

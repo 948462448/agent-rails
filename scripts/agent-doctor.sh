@@ -5,10 +5,12 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails doctor [--project PATH] [--profile PATH] [--openmemory-smoke]
+Usage: agent-rails doctor [--project PATH] [--profile PATH] [--openmemory-smoke] [--fix] [--mode local|project] [--session-hook] [--global-reminder] [--dry-run]
 
 Checks project/profile wiring, Claude adapter files, local ignore status, skills,
 model presets, OpenMemory readiness, optional OpenMemory read smoke, and required command-line tools.
+
+--fix refreshes the Claude adapter and bundled skills for the target project.
 USAGE
 }
 
@@ -23,6 +25,11 @@ AGENT_RAILS_VERSION="$(agent_rails_version)"
 project="$PWD"
 profile_path=""
 openmemory_smoke=0
+fix=0
+fix_mode="local"
+fix_session_hook=0
+fix_global_reminder=0
+fix_dry_run=0
 failures=0
 warnings=0
 
@@ -40,6 +47,30 @@ while [[ $# -gt 0 ]]; do
       ;;
     --openmemory-smoke)
       openmemory_smoke=1
+      shift
+      ;;
+    --fix)
+      fix=1
+      shift
+      ;;
+    --mode)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      case "$2" in
+        local|project) fix_mode="$2" ;;
+        *) usage >&2; exit 2 ;;
+      esac
+      shift 2
+      ;;
+    --session-hook)
+      fix_session_hook=1
+      shift
+      ;;
+    --global-reminder)
+      fix_global_reminder=1
+      shift
+      ;;
+    --dry-run)
+      fix_dry_run=1
       shift
       ;;
     --help|-h)
@@ -69,6 +100,19 @@ fail() {
 
 info() {
   printf '[INFO] %s\n' "$1"
+}
+
+print_command() {
+  local first=1 arg
+  for arg in "$@"; do
+    if [[ "$first" -eq 1 ]]; then
+      first=0
+    else
+      printf ' '
+    fi
+    printf '%q' "$arg"
+  done
+  printf '\n'
 }
 
 command_status() {
@@ -383,8 +427,11 @@ check_command_path="$claude_dir/commands/agent-rails-check.md"
 claude_project_md_path="$project_abs/CLAUDE.md"
 claude_local_md_path="$project_abs/CLAUDE.local.md"
 claude_settings_path="${AGENT_RAILS_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+claude_user_md_path="${AGENT_RAILS_CLAUDE_USER_MD:-$HOME/.claude/CLAUDE.md}"
 session_hook_path="$AGENT_RAILS_HOME/hooks/agent-rails-session-start.sh"
 adapter_version="$(read_adapter_version)"
+existing_session_hook=0
+existing_global_reminder=0
 
 [[ -f "$guide_path" ]] && ok "Claude guide installed: $guide_path" || warn "Missing Claude guide: $guide_path"
 [[ -f "$pack_command_path" ]] && ok "Claude pack command installed." || warn "Missing Claude pack command: $pack_command_path"
@@ -401,10 +448,10 @@ if [[ -n "$adapter_version" ]]; then
   if [[ "$adapter_version" == "$AGENT_RAILS_VERSION" ]]; then
     ok "Claude adapter version: $adapter_version"
   else
-    warn "Claude adapter version $adapter_version differs from kit version $AGENT_RAILS_VERSION; run claude upgrade."
+    warn "Claude adapter version $adapter_version differs from kit version $AGENT_RAILS_VERSION; run doctor --fix."
   fi
 elif [[ -f "$guide_path" || -f "$claude_local_md_path" || -f "$claude_project_md_path" ]]; then
-  warn "Claude adapter version missing; run claude upgrade."
+  warn "Claude adapter version missing; run doctor --fix."
 fi
 
 if [[ -f "$guide_path" ]] && ! grep -Fq "$profile_path" "$guide_path"; then
@@ -418,12 +465,16 @@ if [[ -f "$pack_command_path" ]] && ! grep -Fq 'git rev-parse --show-toplevel' "
 fi
 
 if [[ -f "$claude_settings_path" ]] && grep -Fq "agent-rails-session-start.sh" "$claude_settings_path"; then
+  existing_session_hook=1
   ok "Claude SessionStart hook installed: $claude_settings_path"
   if ! grep -Fq "$session_hook_path" "$claude_settings_path"; then
     warn "Claude SessionStart hook points to a different Agent Rails path; reinstall with --session-hook if this kit moved."
   fi
 else
   info "Claude SessionStart hook not installed; pass --session-hook to inject Agent Rails as startup context."
+fi
+if [[ -f "$claude_user_md_path" ]] && grep -Fq '<!-- agent-rails:global-reminder:start -->' "$claude_user_md_path"; then
+  existing_global_reminder=1
 fi
 
 printf '\nSkills\n'
@@ -489,8 +540,31 @@ printf -- '- Generate pack: %s pack --project "%s" --profile "%s" "<goal>"\n' "$
 printf -- '- Check verification plan: %s check --project "%s" --profile "%s" --print-only\n' "$AGENT_RAILS_BIN" "$project_abs" "$profile_path"
 printf -- '- Install Claude adapter: %s claude install --project "%s" --profile "%s" --mode local\n' "$AGENT_RAILS_BIN" "$project_abs" "$profile_path"
 printf -- '- Install Claude adapter with startup hook: %s claude install --project "%s" --profile "%s" --mode local --session-hook\n' "$AGENT_RAILS_BIN" "$project_abs" "$profile_path"
-printf -- '- Upgrade Claude adapter: %s claude upgrade --project "%s" --profile "%s" --mode local\n' "$AGENT_RAILS_BIN" "$project_abs" "$profile_path"
+printf -- '- Fix local Agent Rails adapter: %s doctor --project "%s" --profile "%s" --fix\n' "$AGENT_RAILS_BIN" "$project_abs" "$profile_path"
 printf -- '- Preview Claude adapter removal: %s claude uninstall --project "%s" --dry-run\n' "$AGENT_RAILS_BIN" "$project_abs"
+
+if [[ "$fix" -eq 1 ]]; then
+  printf '\nFixes\n'
+  if [[ "$failures" -gt 0 ]]; then
+    warn "Skipping --fix because doctor has failures. Resolve failures first, then rerun doctor --fix."
+  else
+    fix_args=(--force --project "$project_abs" --profile "$profile_path" --mode "$fix_mode")
+    if [[ "$fix_session_hook" -eq 1 || "$existing_session_hook" -eq 1 ]]; then
+      fix_args+=(--session-hook)
+    fi
+    if [[ "$fix_global_reminder" -eq 1 || "$existing_global_reminder" -eq 1 ]]; then
+      fix_args+=(--global-reminder)
+    fi
+    if [[ "$fix_dry_run" -eq 1 ]]; then
+      fix_args+=(--dry-run)
+      printf 'Would run: '
+      print_command "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" "${fix_args[@]}"
+    else
+      "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" "${fix_args[@]}"
+      printf 'Doctor fix completed. Re-run doctor to verify a clean state.\n'
+    fi
+  fi
+fi
 
 printf '\n'
 if [[ "$failures" -gt 0 ]]; then

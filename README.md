@@ -14,6 +14,7 @@ bin/agent-rails --version
 
 ```text
 VERSION                         # Agent Rails kit 版本单一来源
+CHANGELOG.md                    # 版本更新记录
 bin/agent-rails                 # CLI 入口
 scripts/agent-context-pack.sh   # 生成 Task Pack
 scripts/agent-run.sh            # 串起 pack/estimate/check/memory curator 的本地 wrapper
@@ -243,11 +244,24 @@ agent-rails claude install \
 
 仓库也带了 `.claude-plugin/plugin.json`、`.codex-plugin/plugin.json` 和 `hooks/claude-hooks.json`。Claude/Codex plugin 形态都复用同一个 SessionStart hook；Codex 模式下 hook 会输出 `hookSpecificOutput.additionalContext` JSON。日常 Claude 个人使用时 `--session-hook` 更直接。安装/卸载 settings hook 需要本机有 `python3`，hook 运行本身只依赖 `bash`。
 
-本地 Codex 试装可以用 repo-local marketplace：
+本地 Codex 安装可以用 repo-local marketplace 封装命令：
 
 ```bash
-codex plugin marketplace add /Users/songlei/workspace/agent-rails/codex-marketplace
-codex plugin add agent-rails@agent-rails-local
+agent-rails codex install
+```
+
+如果同时要检查目标项目是否有 Agent Rails marker：
+
+```bash
+agent-rails codex doctor --project /path/to/project
+```
+
+如果希望安装 Codex plugin 后顺手刷新目标项目 adapter/skills：
+
+```bash
+agent-rails codex install \
+  --project /path/to/project \
+  --fix-project
 ```
 
 安装后新开 Codex 线程才能看到 plugin 注入。当前线程内可用下面的自测模拟 Codex hook 输出：
@@ -297,30 +311,26 @@ agent-rails claude install \
 
 `--write-claude-md` 仍可用，等价于 `--mode project`。这两种模式都是强引导，不是 Claude Code 内核级硬拦截。
 
-升级已安装的 adapter：
-
-```bash
-agent-rails claude upgrade \
-  --project /path/to/project \
-  --profile ~/.agent-rails/profiles/projects/project.profile \
-  --mode local \
-  --global-reminder \
-  --session-hook
-```
-
 版本更新流程：
 
 ```bash
 cd /Users/songlei/workspace/agent-rails
-git pull origin main
-agent-rails --version
-bash tests/run.sh
-agent-rails doctor --project /path/to/project --profile /path/to/profile
-agent-rails claude upgrade --project /path/to/project --profile /path/to/profile --mode local --session-hook
-agent-rails skills install --dest /path/to/project/.claude/skills
+agent-rails update \
+  --project /path/to/project \
+  --profile /path/to/profile \
+  --session-hook
 ```
 
-`VERSION` 是 kit 版本的单一来源；Claude/Codex plugin manifest 应与它保持一致。`claude install/upgrade` 会把版本写入项目 adapter，`doctor` 会提示 adapter 或 plugin manifest 版本落后。
+`update` 会对 kit 执行 `git pull --ff-only`，跑 `bash tests/run.sh`，对目标项目执行 `doctor`，然后刷新 Claude adapter/skills，再跑一次 `doctor`。如果只想刷新目标项目 adapter，不想 pull/test 整个 kit，可以用：
+
+```bash
+agent-rails doctor \
+  --project /path/to/project \
+  --profile /path/to/profile \
+  --fix
+```
+
+`VERSION` 是 kit 版本的单一来源；Claude/Codex plugin manifest 应与它保持一致。`claude install` 会把版本写入项目 adapter，`doctor` 会提示 adapter 或 plugin manifest 版本落后，`doctor --fix` 会刷新本地 adapter 和 bundled skills。每个版本的变化记录在 `CHANGELOG.md`。
 
 卸载前可先预览：
 
@@ -333,6 +343,12 @@ agent-rails claude uninstall \
 ```
 
 卸载只移除 Agent Rails 生成的 `.claude/AGENT_RAILS.md`、slash commands、Agent Rails skill 目录、`CLAUDE.local.md` 中带 marker 的块、project/旧版 local `CLAUDE.md` 中带 marker 的块、本地 ignore marker、传入 `--global-reminder` 时的个人全局提醒块，以及传入 `--session-hook` 时的个人 SessionStart hook。
+
+Codex plugin 卸载：
+
+```bash
+agent-rails codex uninstall
+```
 
 任务结束后由模型做 memory curator 判断。没有可复用价值时记录 skip：
 

@@ -94,6 +94,74 @@ test_plugin_manifests_match_version_file() {
   assert_file_contains "$ROOT_DIR/codex-marketplace/plugins/agent-rails/.codex-plugin/plugin.json" "\"version\": \"$EXPECTED_AGENT_RAILS_VERSION\""
 }
 
+test_changelog_contains_version_file() {
+  assert_file_contains "$ROOT_DIR/CHANGELOG.md" "## $EXPECTED_AGENT_RAILS_VERSION"
+}
+
+test_update_dry_run_sequences_project_refresh() {
+  local repo="$TMP_ROOT/update-dry-run"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  output="$("$AGENT_RAILS_BIN" update --project "$repo" --skip-pull --skip-tests --dry-run --session-hook)"
+
+  assert_contains "$output" "Agent Rails Update"
+  assert_contains "$output" "Skip git pull (--skip-pull)."
+  assert_contains "$output" "Skip tests (--skip-tests)."
+  assert_contains "$output" "Run pre-upgrade doctor"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN doctor --project"
+  assert_contains "$output" "Refresh target adapter and skills"
+  assert_contains "$output" "agent-install-claude.sh"
+  assert_contains "$output" "--force"
+  assert_contains "$output" "--session-hook"
+  assert_contains "$output" "Run final doctor"
+}
+
+test_upgrade_self_alias_uses_update_flow() {
+  local repo="$TMP_ROOT/upgrade-self"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  output="$("$AGENT_RAILS_BIN" upgrade self --project "$repo" --skip-pull --skip-tests --skip-doctor --skip-adapter --dry-run)"
+
+  assert_contains "$output" "Agent Rails Update"
+  assert_contains "$output" "Skip pre-upgrade doctor (--skip-doctor)."
+  assert_contains "$output" "Skip adapter upgrade (--skip-adapter)."
+  assert_contains "$output" "Agent Rails update complete."
+}
+
+test_codex_install_and_uninstall_dry_run() {
+  local repo="$TMP_ROOT/codex-install"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  output="$("$AGENT_RAILS_BIN" codex install --project "$repo" --fix-project --dry-run)"
+
+  assert_contains "$output" "Agent Rails Codex Install"
+  assert_contains "$output" "codex plugin marketplace add"
+  assert_contains "$output" "codex-marketplace"
+  assert_contains "$output" "codex plugin add agent-rails@agent-rails-local"
+  assert_contains "$output" "doctor --project"
+  assert_contains "$output" "--fix"
+  assert_contains "$output" "Open a new Codex thread"
+
+  output="$("$AGENT_RAILS_BIN" codex uninstall --dry-run)"
+  assert_contains "$output" "Agent Rails Codex Uninstall"
+  assert_contains "$output" "codex plugin remove agent-rails@agent-rails-local"
+}
+
 test_agent_check_includes_bin_entrypoint() {
   local repo="$TMP_ROOT/check-bin"
   local output
@@ -390,8 +458,10 @@ test_claude_force_replaces_existing_block() {
   assert_file_contains "$repo/CLAUDE.md" "Subagent Result Contract"
 }
 
-test_claude_upgrade_and_uninstall() {
-  local repo="$TMP_ROOT/claude-upgrade-uninstall"
+test_claude_install_refresh_and_uninstall() {
+  local repo="$TMP_ROOT/claude-refresh-uninstall"
+  local claude_user_md="$TMP_ROOT/claude-refresh-CLAUDE.md"
+  local claude_settings="$TMP_ROOT/claude-refresh-settings.json"
   local exclude_path
   mkdir -p "$repo"
   git -C "$repo" init -q
@@ -414,7 +484,7 @@ test_claude_upgrade_and_uninstall() {
   assert_file_contains "$repo/.claude/commands/agent-rails-lite.md" "git rev-parse --show-toplevel"
   assert_file_not_exists "$repo/CLAUDE.md"
   printf 'stale guide\n' > "$repo/.claude/AGENT_RAILS.md"
-  "$AGENT_RAILS_BIN" claude upgrade --project "$repo" --mode local >/dev/null
+  AGENT_RAILS_CLAUDE_USER_MD="$claude_user_md" AGENT_RAILS_CLAUDE_SETTINGS="$claude_settings" "$AGENT_RAILS_BIN" doctor --project "$repo" --fix >/dev/null
   assert_file_contains "$repo/.claude/AGENT_RAILS.md" "Task Pack"
   assert_file_contains "$repo/CLAUDE.local.md" "Subagent Result Contract"
 
@@ -433,6 +503,21 @@ test_claude_upgrade_and_uninstall() {
     printf 'Expected Agent Rails local ignore block to be removed.\n' >&2
     exit 1
   fi
+}
+
+test_claude_upgrade_alias_is_deprecated() {
+  local repo="$TMP_ROOT/claude-upgrade-alias"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  output="$("$AGENT_RAILS_BIN" claude upgrade --project "$repo" --mode local 2>&1)"
+
+  assert_contains "$output" "Deprecated: use"
+  assert_file_contains "$repo/.claude/AGENT_RAILS.md" "Task Pack"
 }
 
 test_claude_local_does_not_touch_tracked_claude_md() {
@@ -636,6 +721,30 @@ test_doctor_ok_after_local_install() {
   assert_contains "$output" "skill installed: agent-eval"
   assert_contains "$output" "skill installed: agent-refactor"
   assert_contains "$output" "skill installed: agent-tdd"
+  assert_contains "$output" "Doctor status: OK"
+}
+
+test_doctor_fix_refreshes_stale_adapter_version() {
+  local repo="$TMP_ROOT/doctor-fix"
+  local claude_user_md="$TMP_ROOT/doctor-fix-CLAUDE.md"
+  local claude_settings="$TMP_ROOT/doctor-fix-settings.json"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  AGENT_RAILS_CLAUDE_USER_MD="$claude_user_md" AGENT_RAILS_CLAUDE_SETTINGS="$claude_settings" AGENT_RAILS_VERSION_OVERRIDE=0.1.0 "$AGENT_RAILS_BIN" claude install --project "$repo" --mode local >/dev/null
+  output="$(AGENT_RAILS_CLAUDE_USER_MD="$claude_user_md" AGENT_RAILS_CLAUDE_SETTINGS="$claude_settings" "$AGENT_RAILS_BIN" doctor --project "$repo")"
+  assert_contains "$output" "Claude adapter version 0.1.0 differs from kit version $EXPECTED_AGENT_RAILS_VERSION"
+
+  output="$(AGENT_RAILS_CLAUDE_USER_MD="$claude_user_md" AGENT_RAILS_CLAUDE_SETTINGS="$claude_settings" "$AGENT_RAILS_BIN" doctor --project "$repo" --fix)"
+  assert_contains "$output" "Fixes"
+  assert_contains "$output" "Doctor fix completed"
+
+  output="$(AGENT_RAILS_CLAUDE_USER_MD="$claude_user_md" AGENT_RAILS_CLAUDE_SETTINGS="$claude_settings" "$AGENT_RAILS_BIN" doctor --project "$repo")"
+  assert_contains "$output" "Claude adapter version: $EXPECTED_AGENT_RAILS_VERSION"
   assert_contains "$output" "Doctor status: OK"
 }
 
@@ -1042,6 +1151,18 @@ printf 'ok - version command reads VERSION\n'
 test_plugin_manifests_match_version_file
 printf 'ok - plugin manifests match VERSION\n'
 
+test_changelog_contains_version_file
+printf 'ok - changelog contains VERSION\n'
+
+test_update_dry_run_sequences_project_refresh
+printf 'ok - update dry-run sequences project refresh\n'
+
+test_upgrade_self_alias_uses_update_flow
+printf 'ok - upgrade self alias uses update flow\n'
+
+test_codex_install_and_uninstall_dry_run
+printf 'ok - codex install/uninstall dry-run\n'
+
 test_agent_check_includes_bin_entrypoint
 printf 'ok - agent-check includes bin/agent-rails\n'
 
@@ -1081,8 +1202,11 @@ printf 'ok - eval init record report\n'
 test_claude_force_replaces_existing_block
 printf 'ok - claude install --force replaces existing block\n'
 
-test_claude_upgrade_and_uninstall
-printf 'ok - claude upgrade and uninstall lifecycle\n'
+test_claude_install_refresh_and_uninstall
+printf 'ok - claude install refresh and uninstall lifecycle\n'
+
+test_claude_upgrade_alias_is_deprecated
+printf 'ok - claude upgrade alias is deprecated\n'
 
 test_claude_local_does_not_touch_tracked_claude_md
 printf 'ok - claude local leaves tracked CLAUDE.md alone\n'
@@ -1110,6 +1234,9 @@ printf 'ok - doctor reports missing adapter as warning\n'
 
 test_doctor_ok_after_local_install
 printf 'ok - doctor ok after local install\n'
+
+test_doctor_fix_refreshes_stale_adapter_version
+printf 'ok - doctor --fix refreshes stale adapter version\n'
 
 test_doctor_openmemory_smoke_dry_run
 printf 'ok - doctor openmemory smoke dry-run\n'

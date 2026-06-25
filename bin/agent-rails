@@ -17,6 +17,8 @@ usage() {
 Usage:
   agent-rails --version
   agent-rails version
+  agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
+  agent-rails upgrade self [update args...]
   agent-rails init [--shell zsh|bash|fish] [--project PATH] [--profile PATH]
   agent-rails pack [--project PATH] [agent-context-pack args...]
   agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [goal text...]
@@ -27,14 +29,18 @@ Usage:
   agent-rails doctor [--project PATH] [--profile PATH] [--openmemory-smoke]
   agent-rails profile init [--project PATH] [--name NAME] [--scope user|project] [--print-only]
   agent-rails claude install [--project PATH] [--profile PATH] [--mode local|project] [--global-reminder] [--session-hook]
-  agent-rails claude upgrade [--project PATH] [--profile PATH] [--mode local|project] [--global-reminder] [--session-hook]
   agent-rails claude uninstall [--project PATH] [--global-reminder] [--session-hook] [--dry-run]
+  agent-rails codex install [--project PATH] [--profile PATH] [--fix-project] [--dry-run]
+  agent-rails codex doctor [--project PATH]
+  agent-rails codex uninstall [--dry-run]
   agent-rails memory suggest [--project PATH] [--profile PATH] [--decision keep|skip|update|merge] [--write-local] [notes...]
   agent-rails skills install --dest PATH [--dry-run] [skill-name...]
   agent-rails home
 
 Examples:
   agent-rails --version
+  agent-rails update --project /path/to/project --session-hook
+  agent-rails upgrade self --project /path/to/project --skip-pull
   agent-rails init
   agent-rails pack --project /path/to/project "review current changes"
   agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "review current changes"
@@ -52,8 +58,10 @@ Examples:
   agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local
   agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --global-reminder
   agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --session-hook
-  agent-rails claude upgrade --project /path/to/project --profile /path/to/profile --mode local --global-reminder --session-hook
   agent-rails claude uninstall --project /path/to/project --dry-run
+  agent-rails codex install --project /path/to/project --fix-project
+  agent-rails codex doctor --project /path/to/project
+  agent-rails codex uninstall --dry-run
   agent-rails memory suggest --project /path/to/project --decision skip --reason "one-off output"
   agent-rails memory suggest --project /path/to/project --write-local --title "Backend runs on Pandora Boot" "lesson to keep"
   agent-rails skills install --dest /path/to/project/.claude/skills agent-context-pack agent-check
@@ -101,6 +109,25 @@ run_in_project() {
 }
 
 case "$command" in
+  update)
+    "$AGENT_RAILS_HOME/scripts/agent-update.sh" "$@"
+    ;;
+  upgrade)
+    subcommand="${1:-}"
+    case "$subcommand" in
+      self)
+        shift
+        "$AGENT_RAILS_HOME/scripts/agent-update.sh" "$@"
+        ;;
+      ""|--help|-h)
+        "$AGENT_RAILS_HOME/scripts/agent-update.sh" --help
+        ;;
+      *)
+        usage >&2
+        exit 2
+        ;;
+    esac
+    ;;
   init)
     "$AGENT_RAILS_HOME/scripts/agent-init-shell.sh" "$@"
     ;;
@@ -169,6 +196,7 @@ case "$command" in
         ;;
       upgrade)
         shift
+        printf 'Deprecated: use `agent-rails doctor --fix` for project adapter refresh or `agent-rails update` for kit updates.\n' >&2
         "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" --force "$@"
         ;;
       uninstall)
@@ -180,6 +208,9 @@ case "$command" in
         exit 2
         ;;
     esac
+    ;;
+  codex)
+    "$AGENT_RAILS_HOME/scripts/agent-codex.sh" "$@"
     ;;
   memory)
     subcommand="${1:-}"

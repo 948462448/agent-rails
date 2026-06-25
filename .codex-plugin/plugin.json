@@ -1,0 +1,25 @@
+{
+  "name": "agent-rails",
+  "version": "0.1.0",
+  "description": "Personal Agent Rails task-pack, memory, and verification workflow for Codex projects.",
+  "author": {
+    "name": "songlei"
+  },
+  "keywords": ["agent-rails", "task-pack", "verification", "memory", "codex"],
+  "skills": "./skills/",
+  "hooks": "./hooks/claude-hooks.json",
+  "interface": {
+    "displayName": "Agent Rails",
+    "shortDescription": "Personal task-pack and verification rails",
+    "longDescription": "Adds Agent Rails skills plus a SessionStart hook that activates only in projects with a local Agent Rails adapter marker.",
+    "developerName": "songlei",
+    "category": "Productivity",
+    "capabilities": ["Instructions", "Lifecycle hooks"],
+    "defaultPrompt": [
+      "Use Agent Rails for this project.",
+      "Generate an Agent Rails Task Pack.",
+      "Check verification with Agent Rails."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

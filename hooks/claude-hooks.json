@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-rails-session-start.sh\"; exit 0",
+            "timeout": 5,
+            "statusMessage": "Loading Agent Rails..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -49,9 +49,6 @@ if [[ -z "$dest" ]]; then
   exit 2
 fi
 
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
-
 source_dir="$AGENT_RAILS_HOME/skills"
 if [[ ! -d "$source_dir" ]]; then
   printf 'Missing source dir: %s\n' "$source_dir" >&2

@@ -6,17 +6,31 @@
 
 - 不把 Agent Rails 文件提交到业务仓库。
 - 不把 AccessKey、cookie、token 写入本项目。
+- 用户级配置放在 `~/.agent-rails/`；项目级配置只放目标项目的 `.agent-rails/`，不要放进本 kit 的运行目录。
 - OpenMemory 写入、修复、导出验证脚本不在最小 kit 内；在线 memory 只作为 `pack` 的可选读取 provider。
 
 ## 常用命令
 
 ```bash
-bin/agent-rails pack --project /path/to/open-eval "本次任务目标"
-bin/agent-rails check --project /path/to/open-eval --print-only
-bin/agent-rails skills install --dest /path/to/open-eval/.claude/skills
+bin/agent-rails pack --project /path/to/project "本次任务目标"
+bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "本次任务目标"
+bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode lite "POC / deploy prep 目标"
+bin/agent-rails check --project /path/to/project --print-only
+bin/agent-rails estimate --model glm5.1 --tokenizer char --file /path/to/task-pack.md
+bin/agent-rails doctor --project /path/to/project --profile /path/to/profile
+bin/agent-rails doctor --project /path/to/project --profile /path/to/profile --openmemory-smoke
+bin/agent-rails profile init --project /path/to/project
+bin/agent-rails profile init --project /path/to/project --scope project
+bin/agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local
+bin/agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --session-hook
+bin/agent-rails claude upgrade --project /path/to/project --profile /path/to/profile --mode local
+bin/agent-rails claude uninstall --project /path/to/project --session-hook --dry-run
+bin/agent-rails skills install --dest /path/to/project/.claude/skills
+codex plugin marketplace add /Users/songlei/workspace/agent-rails/codex-marketplace
+codex plugin add agent-rails@agent-rails-local
 ```
 
-个人配置放在：
+如需启用在线 memory，个人配置可放在：
 
 ```text
 ~/.agent-rails/openmemory.env

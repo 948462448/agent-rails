@@ -1,0 +1,24 @@
+{
+  "name": "agent-rails",
+  "version": "0.1.0",
+  "description": "Local Agent Rails SessionStart hook for Codex self-iteration.",
+  "author": {
+    "name": "songlei"
+  },
+  "keywords": ["agent-rails", "task-pack", "verification", "memory", "codex"],
+  "hooks": "./hooks/claude-hooks.json",
+  "interface": {
+    "displayName": "Agent Rails",
+    "shortDescription": "Personal task-pack and verification rails",
+    "longDescription": "Loads Agent Rails startup context for projects with a local Agent Rails adapter marker, backed by the local agent-rails kit checkout.",
+    "developerName": "songlei",
+    "category": "Productivity",
+    "capabilities": ["Instructions", "Lifecycle hooks"],
+    "defaultPrompt": [
+      "Use Agent Rails for this project.",
+      "Generate an Agent Rails Task Pack.",
+      "Check verification with Agent Rails."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

@@ -10,15 +10,43 @@ export AGENT_RAILS_HOME
 usage() {
   cat <<'USAGE'
 Usage:
+  agent-rails init [--shell zsh|bash|fish] [--project PATH] [--profile PATH]
   agent-rails pack [--project PATH] [agent-context-pack args...]
+  agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [goal text...]
   agent-rails check [--project PATH] [agent-check args...]
+  agent-rails estimate [--profile PATH] [--model NAME] [--tokenizer auto|char|tiktoken|command] [--file PATH] [text...]
+  agent-rails eval init|record|report [eval args...]
+  agent-rails doctor [--project PATH] [--profile PATH] [--openmemory-smoke]
+  agent-rails profile init [--project PATH] [--name NAME] [--scope user|project] [--print-only]
+  agent-rails claude install [--project PATH] [--profile PATH] [--mode local|project] [--global-reminder] [--session-hook]
+  agent-rails claude upgrade [--project PATH] [--profile PATH] [--mode local|project] [--global-reminder] [--session-hook]
+  agent-rails claude uninstall [--project PATH] [--global-reminder] [--session-hook] [--dry-run]
+  agent-rails memory suggest [--project PATH] [--profile PATH] [--decision keep|skip|update|merge] [--write-local] [notes...]
   agent-rails skills install --dest PATH [--dry-run] [skill-name...]
   agent-rails home
 
 Examples:
-  agent-rails pack --project /path/to/open-eval --target-ref my-branch "review trajectory eval"
-  agent-rails check --project /path/to/open-eval --print-only
-  agent-rails skills install --dest /path/to/open-eval/.claude/skills agent-context-pack agent-check
+  agent-rails init
+  agent-rails pack --project /path/to/project "review current changes"
+  agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "review current changes"
+  agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode lite "POC deploy prep"
+  agent-rails pack --project /path/to/project --model qwen3.7-max --pack-mode deep "review current changes"
+  agent-rails check --project /path/to/project --print-only
+  agent-rails estimate --model glm5.1 --tokenizer char --file /path/to/task-pack.md
+  agent-rails eval init --dir evals
+  agent-rails eval record --task evals/tasks/sample.yaml --mode agentrails
+  agent-rails eval report --runs evals/runs
+  agent-rails doctor --project /path/to/project
+  agent-rails profile init --project /path/to/project
+  agent-rails profile init --project /path/to/project --scope project
+  agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local
+  agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --global-reminder
+  agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --session-hook
+  agent-rails claude upgrade --project /path/to/project --profile /path/to/profile --mode local --global-reminder --session-hook
+  agent-rails claude uninstall --project /path/to/project --dry-run
+  agent-rails memory suggest --project /path/to/project --decision skip --reason "one-off output"
+  agent-rails memory suggest --project /path/to/project --write-local --title "Backend runs on Pandora Boot" "lesson to keep"
+  agent-rails skills install --dest /path/to/project/.claude/skills agent-context-pack agent-check
 USAGE
 }
 
@@ -54,11 +82,78 @@ run_in_project() {
 }
 
 case "$command" in
+  init)
+    "$AGENT_RAILS_HOME/scripts/agent-init-shell.sh" "$@"
+    ;;
   pack)
     run_in_project agent-context-pack.sh "$@"
     ;;
+  run)
+    "$AGENT_RAILS_HOME/scripts/agent-run.sh" "$@"
+    ;;
   check)
     run_in_project agent-check.sh "$@"
+    ;;
+  estimate)
+    "$AGENT_RAILS_HOME/scripts/agent-estimate.sh" "$@"
+    ;;
+  eval)
+    subcommand="${1:-}"
+    case "$subcommand" in
+      ""|--help|-h)
+        "$AGENT_RAILS_HOME/scripts/agent-eval.sh" --help
+        ;;
+      init|record|report)
+        shift
+        "$AGENT_RAILS_HOME/scripts/agent-eval.sh" "$subcommand" "$@"
+        ;;
+      *)
+        usage >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  doctor)
+    "$AGENT_RAILS_HOME/scripts/agent-doctor.sh" "$@"
+    ;;
+  profile)
+    subcommand="${1:-}"
+    if [[ "$subcommand" != "init" ]]; then
+      usage >&2
+      exit 2
+    fi
+    shift
+    "$AGENT_RAILS_HOME/scripts/agent-init-profile.sh" "$@"
+    ;;
+  claude)
+    subcommand="${1:-}"
+    case "$subcommand" in
+      install)
+        shift
+        "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" "$@"
+        ;;
+      upgrade)
+        shift
+        "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" --force "$@"
+        ;;
+      uninstall)
+        shift
+        "$AGENT_RAILS_HOME/scripts/agent-uninstall-claude.sh" "$@"
+        ;;
+      *)
+        usage >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  memory)
+    subcommand="${1:-}"
+    if [[ "$subcommand" != "suggest" ]]; then
+      usage >&2
+      exit 2
+    fi
+    shift
+    "$AGENT_RAILS_HOME/scripts/agent-memory-suggest.sh" "$@"
     ;;
   skills)
     subcommand="${1:-}"

@@ -9,8 +9,12 @@ usage() {
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
+# shellcheck source=scripts/agent-paths.sh
+source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+agent_rails_init_paths
 
-profile_path="$AGENT_RAILS_HOME/profiles/open-eval.profile"
+profile_path_arg=""
+profile_path=""
 base_ref=""
 target_ref="HEAD"
 target_ref_explicit=0
@@ -20,7 +24,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
-      profile_path="$2"
+      profile_path_arg="$2"
       shift 2
       ;;
     --base)
@@ -53,49 +57,87 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
+if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  is_git_repo=1
+  repo_root="$(cd "$repo_root" && pwd)"
+  cd "$repo_root"
+else
+  is_git_repo=0
+  repo_root="$PWD"
+fi
+
+profile_path="$(agent_rails_resolve_profile "$repo_root" "$(basename "$repo_root")" "$profile_path_arg")"
+if [[ ! -f "$profile_path" ]]; then
+  printf 'Profile not found: %s\n' "$profile_path" >&2
+  exit 2
+fi
 
 if [[ -f "$profile_path" ]]; then
   # shellcheck source=/dev/null
   source "$profile_path"
 fi
 
-BASE_REF="${base_ref:-${BASE_REF:-origin/master}}"
 TARGET_REF="$target_ref"
+BASE_REF="${base_ref:-${BASE_REF:-}}"
 
-if ! git rev-parse --verify --quiet "$TARGET_REF" >/dev/null; then
-  printf 'Target ref not found: %s\n' "$TARGET_REF" >&2
-  exit 2
-fi
+resolve_default_base_ref() {
+  local ref
+  for ref in origin/main origin/master main master; do
+    if git rev-parse --verify --quiet "$ref" >/dev/null; then
+      printf '%s\n' "$ref"
+      return 0
+    fi
+  done
+}
 
-if [[ "$run_commands" -eq 1 && "$target_ref_explicit" -eq 1 ]]; then
-  target_sha="$(git rev-parse "$TARGET_REF")"
-  head_sha="$(git rev-parse HEAD)"
-  if [[ "$target_sha" != "$head_sha" ]]; then
-    printf 'Cannot --run checks for target ref %s while checkout is at HEAD %s. Use --print-only or check out the target first.\n' "$TARGET_REF" "${head_sha:0:12}" >&2
+if [[ "$is_git_repo" -eq 1 ]]; then
+  if [[ -z "$BASE_REF" ]]; then
+    BASE_REF="$(resolve_default_base_ref)"
+  fi
+
+  if ! git rev-parse --verify --quiet "$TARGET_REF" >/dev/null; then
+    printf 'Target ref not found: %s\n' "$TARGET_REF" >&2
     exit 2
   fi
-fi
 
-if git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
-  merge_base="$(git merge-base "$TARGET_REF" "$BASE_REF")"
+  if [[ "$run_commands" -eq 1 && "$target_ref_explicit" -eq 1 ]]; then
+    target_sha="$(git rev-parse "$TARGET_REF")"
+    head_sha="$(git rev-parse HEAD)"
+    if [[ "$target_sha" != "$head_sha" ]]; then
+      printf 'Cannot --run checks for target ref %s while checkout is at HEAD %s. Use --print-only or check out the target first.\n' "$TARGET_REF" "${head_sha:0:12}" >&2
+      exit 2
+    fi
+  fi
+
+  if [[ -n "$BASE_REF" ]] && git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
+    merge_base="$(git merge-base "$TARGET_REF" "$BASE_REF")"
+  else
+    merge_base="$(git rev-parse "$TARGET_REF")"
+  fi
 else
-  merge_base="$(git rev-parse "$TARGET_REF")"
+  if [[ "$target_ref_explicit" -eq 1 ]]; then
+    printf 'Target ref requires a git repository: %s\n' "$TARGET_REF" >&2
+    exit 2
+  fi
+  merge_base="n/a"
 fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 changed_file_list="$tmp_dir/changed-files"
-{
-  git diff --name-only "$merge_base"..."$TARGET_REF" 2>/dev/null || true
-  if [[ "$target_ref_explicit" -eq 0 ]]; then
-    git diff --name-only 2>/dev/null || true
-    git diff --cached --name-only 2>/dev/null || true
-    git ls-files --others --exclude-standard 2>/dev/null || true
-  fi
-} | awk 'NF' | sort -u > "$changed_file_list"
+if [[ "$is_git_repo" -eq 1 ]]; then
+  {
+    git diff --name-only "$merge_base"..."$TARGET_REF" 2>/dev/null || true
+    if [[ "$target_ref_explicit" -eq 0 ]]; then
+      git diff --name-only 2>/dev/null || true
+      git diff --cached --name-only 2>/dev/null || true
+      git ls-files --others --exclude-standard 2>/dev/null || true
+    fi
+  } | awk 'NF' | sort -u > "$changed_file_list"
+else
+  : > "$changed_file_list"
+fi
 
 commands_file="$tmp_dir/commands"
 : > "$commands_file"
@@ -103,6 +145,7 @@ commands_file="$tmp_dir/commands"
 add_command() {
   local reason="$1"
   local command="$2"
+  [[ -n "$command" ]] || return 0
   if ! cut -f2- "$commands_file" | grep -Fxq "$command"; then
     printf '%s\t%s\n' "$reason" "$command" >> "$commands_file"
   fi
@@ -114,37 +157,66 @@ has_changed() {
 }
 
 if has_changed '^contracts/'; then
-  add_command "contracts changed" "${VERIFY_CONTRACTS:-make codegen-check}"
+  add_command "contracts changed" "${VERIFY_CONTRACTS:-}"
 fi
 
 if has_changed '^backend/|^Makefile$'; then
-  add_command "backend changed" "${VERIFY_BACKEND:-bash scripts/ci/backend.sh}"
+  add_command "backend changed" "${VERIFY_BACKEND:-}"
 fi
 
 if has_changed '^runtime/'; then
-  add_command "runtime changed" "${VERIFY_RUNTIME:-bash scripts/ci/runtime.sh}"
+  add_command "runtime changed" "${VERIFY_RUNTIME:-}"
 fi
 
 if has_changed '^frontend/'; then
-  add_command "frontend changed" "${VERIFY_FRONTEND:-cd frontend && npm run lint}"
+  add_command "frontend changed" "${VERIFY_FRONTEND:-}"
+fi
+
+if has_changed '(^package(-lock)?\.json$|^pnpm-lock\.yaml$|^yarn\.lock$|\.(js|jsx|ts|tsx)$)'; then
+  add_command "node/js changed" "${VERIFY_NODE:-}"
+fi
+
+if has_changed '(^pyproject\.toml$|^requirements.*\.txt$|^setup\.py$|^pytest\.ini$|\.py$)'; then
+  add_command "python changed" "${VERIFY_PYTHON:-}"
+fi
+
+if has_changed '(^pom\.xml$|^mvnw$|^build\.gradle$|^settings\.gradle$|\.java$|\.kt$)'; then
+  add_command "java/jvm changed" "${VERIFY_JAVA:-}"
+fi
+
+if has_changed '(^go\.mod$|^go\.sum$|\.go$)'; then
+  add_command "go changed" "${VERIFY_GO:-}"
+fi
+
+if has_changed '(^Cargo\.toml$|^Cargo\.lock$|\.rs$)'; then
+  add_command "rust changed" "${VERIFY_RUST:-}"
 fi
 
 if has_changed '^dolphin/.*\.py$'; then
-  dolphin_py_files="$(grep -E '^dolphin/.*\.py$' "$changed_file_list" | tr '\n' ' ')"
-  add_command "dolphin python changed" "${VERIFY_DOLPHIN:-python3 -m py_compile ${dolphin_py_files}}"
+  add_command "dolphin python changed" "${VERIFY_DOLPHIN:-}"
 elif has_changed '^dolphin/'; then
-  add_command "dolphin changed" "${VERIFY_DOLPHIN:-python3 -m py_compile dolphin/tpp_eval_node/rawscript/tpp_eval_dolphin_main.py dolphin/tpp_eval_node/ray_entry/tpp_eval_main.py}"
+  add_command "dolphin changed" "${VERIFY_DOLPHIN:-}"
 fi
 
-if has_changed '^scripts/.*\.sh$'; then
-  shell_files="$(grep -E '^scripts/.*\.sh$' "$changed_file_list" | tr '\n' ' ')"
-  add_command "shell scripts changed" "${VERIFY_SHELL:-bash -n ${shell_files}}"
+if has_changed '^(bin/agent-rails|scripts/.*\.sh)$'; then
+  shell_files="$(grep -E '^(bin/agent-rails|scripts/.*\.sh)$' "$changed_file_list" | tr '\n' ' ')"
+  add_command "shell entrypoints changed" "${VERIFY_SHELL:-bash -n ${shell_files}}"
 fi
 
+if [[ -s "$changed_file_list" && ! -s "$commands_file" ]]; then
+  add_command "project default" "${VERIFY_PROJECT:-}"
+fi
+
+if [[ "${AGENT_RAILS_SUPPRESS_MARKER:-0}" != "1" ]]; then
+  printf 'AGENT RAILS: CHECK-ONLY (reason=verification, project=%s)\n\n' "$(basename "$repo_root")"
+fi
 printf 'Agent check\n'
-printf 'Base ref: %s\n' "$BASE_REF"
+printf 'Base ref: %s\n' "${BASE_REF:-none}"
 printf 'Target ref: %s\n' "$TARGET_REF"
 printf 'Merge base: %s\n' "${merge_base:0:12}"
+if [[ "$is_git_repo" -eq 0 ]]; then
+  printf 'Mode: no git repository detected; diff-based checks are unavailable.\n'
+fi
 if [[ "$target_ref_explicit" -eq 1 ]]; then
   printf 'Mode: target ref only; current working tree changes are not included.\n'
 fi
@@ -171,8 +243,13 @@ printf -- '- Later: add missing AGENTS.md or provider config when context gaps r
 
 if [[ "$run_commands" -eq 1 && -s "$commands_file" ]]; then
   printf '\nRunning suggested commands...\n'
+  runner_shell="${AGENT_RAILS_RUN_SHELL:-bash}"
+  if ! command -v "$runner_shell" >/dev/null 2>&1; then
+    printf 'Runner shell not found: %s\n' "$runner_shell" >&2
+    exit 127
+  fi
   while IFS=$'\t' read -r reason command; do
     printf '\n>>> %s\n%s\n' "$reason" "$command"
-    eval "$command"
+    "$runner_shell" -lc "$command"
   done < "$commands_file"
 fi

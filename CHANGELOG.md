@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 - 2026-06-26
+
+- Removed OpenEval-specific docs, profiles, local memory cards, shell variables, and test examples from the generic Agent Rails kit.
+- Added compatibility for previously installed adapters that still reference deleted kit-local profiles such as `profiles/open-eval.profile`; those now fall back to `profiles/default.profile`.
+- Centralized explicit profile resolution across `pack`, `run`, `check`, `doctor`, `update`, `claude install`, and `codex install`, while keeping missing non-kit profiles as hard failures.
+- Updated the SessionStart hook to resolve stale profile paths before printing startup commands.
+- Added regression coverage for legacy profile fallback, stale SessionStart profile references, and missing non-kit profile rejection.
+- Added development milestone documentation in `docs/development-milestones.md`.
+
 ## 0.4.0 - 2026-06-25
 
 - Added `agent-rails codex install`, `agent-rails codex doctor`, and `agent-rails codex uninstall` for the repo-local Codex plugin workflow.

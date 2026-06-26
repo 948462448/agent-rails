@@ -59,6 +59,27 @@ agent_rails_default_memory_decision_path() {
   printf '%s/agent-context/%s-memory-decision.md\n' "$AGENT_RAILS_CONFIG_HOME" "$project_name"
 }
 
+agent_rails_default_profile_path() {
+  printf '%s/profiles/default.profile\n' "$AGENT_RAILS_HOME"
+}
+
+agent_rails_legacy_kit_profile_fallback() {
+  local explicit_profile="$1"
+  local default_profile
+
+  default_profile="$(agent_rails_default_profile_path)"
+  case "$explicit_profile" in
+    "$AGENT_RAILS_HOME"/profiles/*.profile)
+      if [[ "$explicit_profile" != "$default_profile" && ! -f "$explicit_profile" && -f "$default_profile" ]]; then
+        printf '%s\n' "$default_profile"
+        return 0
+      fi
+      ;;
+  esac
+
+  return 1
+}
+
 agent_rails_resolve_profile() {
   local project_abs="$1"
   local project_name="$2"
@@ -68,6 +89,9 @@ agent_rails_resolve_profile() {
   agent_rails_init_paths
 
   if [[ -n "$explicit_profile" ]]; then
+    if agent_rails_legacy_kit_profile_fallback "$explicit_profile"; then
+      return 0
+    fi
     printf '%s\n' "$explicit_profile"
     return 0
   fi
@@ -83,5 +107,5 @@ agent_rails_resolve_profile() {
     fi
   done
 
-  printf '%s/profiles/default.profile\n' "$AGENT_RAILS_HOME"
+  agent_rails_default_profile_path
 }

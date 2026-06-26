@@ -19,8 +19,8 @@ source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
 agent_rails_init_paths
 
 shell_name="$(basename "${SHELL:-zsh}")"
-project_path="/Users/songlei/workspace/open-eval"
-profile_path="$AGENT_RAILS_CONFIG_HOME/profiles/projects/open-eval.profile"
+project_path="${AGENT_RAILS_PROJECT:-$PWD}"
+profile_path="${AGENT_RAILS_PROFILE:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -49,6 +49,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$profile_path" ]]; then
+  project_name="$(basename "$project_path")"
+  profile_path="$AGENT_RAILS_CONFIG_HOME/profiles/projects/${project_name}.profile"
+fi
 
 case "$shell_name" in
   zsh)
@@ -84,8 +89,8 @@ if [[ "$shell_name" == "fish" ]]; then
 set -gx AGENT_RAILS_HOME "$AGENT_RAILS_HOME"
 $path_line
 $alias_line
-set -gx OPEN_EVAL_HOME "$project_path"
-set -gx OPEN_EVAL_PROFILE "$profile_path"
+set -gx AGENT_RAILS_PROJECT "$project_path"
+set -gx AGENT_RAILS_PROFILE "$profile_path"
 EOF
 else
   cat <<EOF
@@ -93,8 +98,8 @@ else
 export AGENT_RAILS_HOME="$AGENT_RAILS_HOME"
 $path_line
 $alias_line
-export OPEN_EVAL_HOME="$project_path"
-export OPEN_EVAL_PROFILE="$profile_path"
+export AGENT_RAILS_PROJECT="$project_path"
+export AGENT_RAILS_PROFILE="$profile_path"
 EOF
 fi
 
@@ -105,13 +110,13 @@ printf '\n3. Verify:\n\n'
 cat <<'EOF'
 agent-rails --help
 agent-rails home
-ar doctor --project "$OPEN_EVAL_HOME" --profile "$OPEN_EVAL_PROFILE"
+ar doctor --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE"
 EOF
 
 printf '\n4. Daily usage after init:\n\n'
 cat <<'EOF'
-ar run --project "$OPEN_EVAL_HOME" --profile "$OPEN_EVAL_PROFILE" --model qwen3.7-max --pack-mode deep "本次任务目标"
-ar run --project "$OPEN_EVAL_HOME" --profile "$OPEN_EVAL_PROFILE" --model qwen3.7-max --pack-mode lite "POC / deploy prep 目标"
-ar claude install --project "$OPEN_EVAL_HOME" --profile "$OPEN_EVAL_PROFILE" --mode local
-ar check --project "$OPEN_EVAL_HOME" --profile "$OPEN_EVAL_PROFILE" --print-only
+ar run --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE" --model qwen3.7-max --pack-mode deep "本次任务目标"
+ar run --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE" --model qwen3.7-max --pack-mode lite "POC / deploy prep 目标"
+ar claude install --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE" --mode local
+ar check --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE" --print-only
 EOF

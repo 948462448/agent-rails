@@ -429,6 +429,33 @@ test_pack_defaults_to_worktree_specific_path() {
   fi
 }
 
+test_init_paths_do_not_leak_default_config_home_to_children() {
+  local repo="$TMP_ROOT/init-paths-child-home"
+  local profile="$TMP_ROOT/init-paths-child-home.profile"
+  local parent_home="$TMP_ROOT/home-init-paths-parent"
+  local child_home="$TMP_ROOT/home-init-paths-child"
+  local output path
+  mkdir -p "$repo" "$parent_home" "$child_home"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  {
+    printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
+    printf 'PROJECT_NAME="init-paths-child"\n'
+  } > "$profile"
+
+  output="$(HOME="$parent_home" bash -c '
+    source "$1/scripts/agent-paths.sh"
+    agent_rails_init_paths
+    HOME="$2" "$3" pack --project "$4" --profile "$5" --budget 1000 "child home check"
+  ' bash "$ROOT_DIR" "$child_home" "$AGENT_RAILS_BIN" "$repo" "$profile")"
+  path="$(printf '%s\n' "$output" | sed -n -E 's/^Wrote //p' | sed -n '1p')"
+
+  assert_contains "$path" "$child_home/.agent-rails/agent-context/"
+  assert_not_contains "$path" "$parent_home/.agent-rails/agent-context/"
+}
+
 test_eval_init_record_report() {
   local repo="$TMP_ROOT/eval-target"
   local eval_dir="$TMP_ROOT/evals"
@@ -1282,6 +1309,9 @@ printf 'ok - run infers lite for poc goal\n'
 
 test_pack_defaults_to_worktree_specific_path
 printf 'ok - pack defaults to worktree-specific path\n'
+
+test_init_paths_do_not_leak_default_config_home_to_children
+printf 'ok - init paths do not leak default config home to children\n'
 
 test_eval_init_record_report
 printf 'ok - eval init record report\n'

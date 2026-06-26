@@ -1,6 +1,6 @@
 {
   "name": "agent-rails",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Local Agent Rails SessionStart hook for Codex self-iteration.",
   "author": {
     "name": "songlei"

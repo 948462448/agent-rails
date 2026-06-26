@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 - 2026-06-26
+
+- Fixed default Agent Rails config paths leaking from parent processes into child commands, which could make tests that override `HOME` still write under the parent's `AGENT_RAILS_CONFIG_HOME`.
+- Added regression coverage for parent `agent_rails_init_paths` calls followed by child `HOME=... agent-rails pack` invocations.
+
 ## 0.5.0 - 2026-06-26
 
 - Removed OpenEval-specific docs, profiles, local memory cards, shell variables, and test examples from the generic Agent Rails kit.

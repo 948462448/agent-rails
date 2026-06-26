@@ -130,9 +130,7 @@ resolve_project() {
     project_abs="$(cd "$git_root_for_project" && pwd)"
   fi
   project_name="$(basename "$project_abs")"
-  if [[ -z "$profile_path" ]]; then
-    profile_path="$(agent_rails_resolve_profile "$project_abs" "$project_name" "")"
-  fi
+  profile_path="$(agent_rails_resolve_profile "$project_abs" "$project_name" "$profile_path")"
   if [[ ! -f "$profile_path" ]]; then
     printf 'Profile not found: %s\n' "$profile_path" >&2
     exit 2

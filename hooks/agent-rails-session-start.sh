@@ -10,6 +10,9 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
+# shellcheck source=scripts/agent-paths.sh
+source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+agent_rails_init_paths
 
 json_escape() {
   local value="$1"
@@ -75,6 +78,9 @@ for source_path in \
     [[ -n "$profile_path" ]] && break
   fi
 done
+if [[ -n "$profile_path" ]]; then
+  profile_path="$(agent_rails_resolve_profile "$project_root" "$(basename "$project_root")" "$profile_path")"
+fi
 
 profile_arg=""
 if [[ -n "$profile_path" ]]; then

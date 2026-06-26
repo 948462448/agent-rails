@@ -15,6 +15,7 @@ bin/agent-rails --version
 ```text
 VERSION                         # Agent Rails kit 版本单一来源
 CHANGELOG.md                    # 版本更新记录
+docs/development-milestones.md  # 开发里程碑和近期演进重点
 bin/agent-rails                 # CLI 入口
 scripts/agent-context-pack.sh   # 生成 Task Pack
 scripts/agent-run.sh            # 串起 pack/estimate/check/memory curator 的本地 wrapper
@@ -33,7 +34,6 @@ scripts/agent-install-skills.sh # 安装本地 skill 蓝图
 scripts/agent-init-shell.sh     # 打印本地 shell 初始化指引
 tests/run.sh                    # 本地 e2e 回归测试
 profiles/default.profile        # kit 内置通用默认 profile
-profiles/open-eval.profile      # 可选的 OpenEval profile 模板
 ~/.agent-rails/profiles/projects/*.profile # 用户级项目 profile
 <project>/.agent-rails/profile  # 可选项目级 profile
 ~/.agent-rails/memory/<project>/*.md # 用户级本地 memory cards
@@ -45,8 +45,6 @@ templates/task-pack.md          # Task Pack 模板
 `agent-eval` 用来把日常任务沉淀成可复现评测集，并记录 JSONL 运行日志。
 
 ## Quick Start
-
-OpenEval 项目接入可以直接看 [docs/open-eval-quickstart.md](docs/open-eval-quickstart.md)。
 
 先初始化本地命令：
 
@@ -168,6 +166,19 @@ agent-rails profile init \
 ```
 
 项目级 profile 会写到 `/path/to/project/.agent-rails/profile`，解析优先级高于用户级 profile。个人 local adapter 会把 `.agent-rails/` 写入本地 ignore，避免误提交到业务仓库。
+
+profile 是 Agent Rails 的项目运行配置，不是 adapter 本身。`CLAUDE.local.md` 和 slash commands 只记录要传给 `pack/run/check/doctor` 的 `--profile` 路径；真正的配置值会在命令运行时从 profile 里 `source` 出来。
+
+profile 解析顺序如下：
+
+1. 显式 `--profile /path/to/profile`
+2. `/path/to/project/.agent-rails/profile`
+3. `/path/to/project/.agent-rails/profile.sh`
+4. `~/.agent-rails/profiles/projects/<project>.profile`
+5. `~/.agent-rails/profiles/<project>.profile`
+6. `/Users/songlei/workspace/agent-rails/profiles/default.profile`
+
+如果旧 adapter 还显式引用已删除的 kit 内置项目 profile，例如 `/Users/songlei/workspace/agent-rails/profiles/open-eval.profile`，Agent Rails 会自动 fallback 到 `profiles/default.profile`，方便先完成升级。用户级 profile（如 `~/.agent-rails/profiles/projects/open-eval.profile`）和项目级 profile 缺失时仍会报 `Profile not found`，避免误用默认配置掩盖真实配置问题。
 
 可在 profile 中调整预算分区：
 
@@ -330,7 +341,7 @@ agent-rails doctor \
   --fix
 ```
 
-`VERSION` 是 kit 版本的单一来源；Claude/Codex plugin manifest 应与它保持一致。`claude install` 会把版本写入项目 adapter，`doctor` 会提示 adapter 或 plugin manifest 版本落后，`doctor --fix` 会刷新本地 adapter 和 bundled skills。每个版本的变化记录在 `CHANGELOG.md`。
+`VERSION` 是 kit 版本的单一来源；Claude/Codex plugin manifest 应与它保持一致。`claude install` 会把版本写入项目 adapter，`doctor` 会提示 adapter 或 plugin manifest 版本落后，`doctor --fix` 会刷新本地 adapter 和 bundled skills。每个版本的变化记录在 `CHANGELOG.md`，阶段性演进记录在 `docs/development-milestones.md`。
 
 卸载前可先预览：
 
@@ -392,6 +403,10 @@ Task Pack 里的 `Trigger Matrix` 会把工作分成四档：
 Task Pack 里的 `Grill Gate` 会在架构、重构、迁移、API 合约、数据模型或需求不清的工作开始前触发。它要求 agent 先一问一答压实方案；能从代码、文档、ADR、测试或 Task Pack 找到答案时，先自己查证，再把推荐答案给出来。默认最多 8 问，剩余非阻塞问题进入 implementation handoff 的 deferred decisions。`lite` 模式跳过完整 grill，只问阻塞问题。
 
 Memory 是跨 session 的长期真相，Task Pack 是本轮切片。Task Pack 不会写 memory；任务结束时应由 `agent-memory-curator` 判断是否 skip / create / update / merge。若 Task Pack 与 memory 口径不一致，先把旧 memory 视为待验证，而不是让 Task Pack 悄悄成为事实来源。
+
+## Development Milestones
+
+开发里程碑记录在 `docs/development-milestones.md`。当前主线是把 Agent Rails 保持为个人本地、项目无关的 kit：业务仓库只作为 `--project` 目标，业务经验放进用户级 profile 或 memory cards，不放进 kit 默认内容。
 
 ## Eval
 

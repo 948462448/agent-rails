@@ -120,9 +120,7 @@ if command -v git >/dev/null 2>&1 && git -C "$project_abs" rev-parse --is-inside
   is_git_repo=1
 fi
 
-if [[ -z "$profile_path" ]]; then
-  profile_path="$(agent_rails_resolve_profile "$project_abs" "$project_name" "")"
-fi
+profile_path="$(agent_rails_resolve_profile "$project_abs" "$project_name" "$profile_path")"
 
 if [[ ! -f "$profile_path" ]]; then
   printf 'Profile not found: %s\n' "$profile_path" >&2

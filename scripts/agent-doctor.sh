@@ -158,12 +158,7 @@ read_adapter_version() {
 
 resolve_profile() {
   local project_name="$1"
-  if [[ -n "$profile_path" ]]; then
-    printf '%s\n' "$profile_path"
-    return 0
-  fi
-
-  agent_rails_resolve_profile "$project_abs" "$project_name" ""
+  agent_rails_resolve_profile "$project_abs" "$project_name" "$profile_path"
 }
 
 known_model_preset() {

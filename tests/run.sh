@@ -68,14 +68,14 @@ assert_file_not_exists() {
 test_init_prints_shell_setup() {
   local output
 
-  output="$("$AGENT_RAILS_BIN" init --shell zsh --project /tmp/open-eval --profile /tmp/open-eval.profile)"
+  output="$("$AGENT_RAILS_BIN" init --shell zsh --project /tmp/sample-project --profile /tmp/sample-project.profile)"
 
   assert_contains "$output" "Agent Rails Init"
   assert_contains "$output" 'export PATH="$AGENT_RAILS_HOME/bin:$PATH"'
   assert_contains "$output" 'alias ar="agent-rails"'
-  assert_contains "$output" 'export OPEN_EVAL_HOME="/tmp/open-eval"'
-  assert_contains "$output" 'export OPEN_EVAL_PROFILE="/tmp/open-eval.profile"'
-  assert_contains "$output" 'ar doctor --project "$OPEN_EVAL_HOME" --profile "$OPEN_EVAL_PROFILE"'
+  assert_contains "$output" 'export AGENT_RAILS_PROJECT="/tmp/sample-project"'
+  assert_contains "$output" 'export AGENT_RAILS_PROFILE="/tmp/sample-project.profile"'
+  assert_contains "$output" 'ar doctor --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE"'
 }
 
 test_version_command_reads_version_file() {
@@ -119,6 +119,24 @@ test_update_dry_run_sequences_project_refresh() {
   assert_contains "$output" "--force"
   assert_contains "$output" "--session-hook"
   assert_contains "$output" "Run final doctor"
+}
+
+test_update_falls_back_from_missing_legacy_kit_profile() {
+  local repo="$TMP_ROOT/update-legacy-profile"
+  local legacy_profile="$ROOT_DIR/profiles/__missing_legacy_profile_for_test__.profile"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  assert_file_not_exists "$legacy_profile"
+
+  output="$("$AGENT_RAILS_BIN" update --project "$repo" --profile "$legacy_profile" --skip-pull --skip-tests --dry-run)"
+
+  assert_contains "$output" "Profile: $ROOT_DIR/profiles/default.profile"
+  assert_not_contains "$output" "$legacy_profile"
+  assert_contains "$output" "Refresh target adapter and skills"
 }
 
 test_upgrade_self_alias_uses_update_flow() {
@@ -376,8 +394,8 @@ test_run_infers_lite_for_poc_goal() {
 }
 
 test_pack_defaults_to_worktree_specific_path() {
-  local repo_a="$TMP_ROOT/worktree-a/open-eval"
-  local repo_b="$TMP_ROOT/worktree-b/open-eval"
+  local repo_a="$TMP_ROOT/worktree-a/sample-project"
+  local repo_b="$TMP_ROOT/worktree-b/sample-project"
   local profile="$TMP_ROOT/worktree-specific.profile"
   local home="$TMP_ROOT/home-worktree-specific"
   local output_a output_b path_a path_b
@@ -392,7 +410,7 @@ test_pack_defaults_to_worktree_specific_path() {
   git_commit "$repo_b" init
   {
     printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
-    printf 'PROJECT_NAME="open-eval"\n'
+    printf 'PROJECT_NAME="sample-project"\n'
     printf 'MEMORY_PROVIDER="local"\n'
   } > "$profile"
 
@@ -403,8 +421,8 @@ test_pack_defaults_to_worktree_specific_path() {
 
   assert_contains "$output_a" "AGENT RAILS: ON"
   assert_contains "$path_a" "$home/.agent-rails/agent-context/"
-  assert_contains "$path_a" "open-eval-"
-  assert_contains "$path_b" "open-eval-"
+  assert_contains "$path_a" "sample-project-"
+  assert_contains "$path_b" "sample-project-"
   if [[ "$path_a" == "$path_b" ]]; then
     printf 'Expected different worktrees to get different Task Pack paths.\n%s\n%s\n' "$path_a" "$path_b" >&2
     exit 1
@@ -604,6 +622,28 @@ test_session_start_hook_respects_project_marker() {
     printf 'Expected hook to stay quiet without an Agent Rails marker.\n%s\n' "$output" >&2
     exit 1
   fi
+}
+
+test_session_start_hook_resolves_missing_legacy_kit_profile() {
+  local repo="$TMP_ROOT/session-hook-legacy-profile"
+  local legacy_profile="$ROOT_DIR/profiles/__missing_legacy_profile_for_test__.profile"
+  local output
+  mkdir -p "$repo/.claude"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  assert_file_not_exists "$legacy_profile"
+  cat > "$repo/.claude/AGENT_RAILS.md" <<EOF
+Visible session marker protocol
+
+$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$legacy_profile" "<goal>"
+EOF
+
+  output="$(CLAUDE_PROJECT_DIR="$repo" "$ROOT_DIR/hooks/agent-rails-session-start.sh")"
+
+  assert_contains "$output" "profiles/default.profile"
+  assert_not_contains "$output" "$legacy_profile"
 }
 
 test_session_start_hook_outputs_codex_json() {
@@ -984,6 +1024,50 @@ test_pack_sorts_changed_files_by_goal() {
   fi
 }
 
+test_pack_falls_back_from_missing_legacy_kit_profile() {
+  local repo="$TMP_ROOT/pack-legacy-profile"
+  local legacy_profile="$ROOT_DIR/profiles/__missing_legacy_profile_for_test__.profile"
+  local output_path="$TMP_ROOT/pack-legacy-profile-task-pack.md"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  assert_file_not_exists "$legacy_profile"
+
+  output="$("$AGENT_RAILS_BIN" pack --project "$repo" --profile "$legacy_profile" --output "$output_path" "legacy profile")"
+
+  assert_contains "$output" "AGENT RAILS: ON"
+  assert_contains "$output" "Wrote $output_path"
+  assert_file_not_contains "$output_path" "$legacy_profile"
+}
+
+test_pack_rejects_missing_non_kit_profile() {
+  local repo="$TMP_ROOT/pack-missing-non-kit-profile"
+  local missing_profile="$TMP_ROOT/missing-project.profile"
+  local output_path="$TMP_ROOT/pack-missing-non-kit-profile-task-pack.md"
+  local output status
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  assert_file_not_exists "$missing_profile"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" pack --project "$repo" --profile "$missing_profile" --output "$output_path" "missing profile" 2>&1)"
+  status=$?
+  set -e
+
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Expected missing non-kit profile to fail.\n%s\n' "$output" >&2
+    exit 1
+  fi
+  assert_contains "$output" "Profile not found: $missing_profile"
+  assert_file_not_exists "$output_path"
+}
+
 test_pack_uses_model_preset_budget() {
   local repo="$TMP_ROOT/model-preset"
   local output="$TMP_ROOT/model-preset-task-pack.md"
@@ -1157,6 +1241,9 @@ printf 'ok - changelog contains VERSION\n'
 test_update_dry_run_sequences_project_refresh
 printf 'ok - update dry-run sequences project refresh\n'
 
+test_update_falls_back_from_missing_legacy_kit_profile
+printf 'ok - update falls back from missing legacy kit profile\n'
+
 test_upgrade_self_alias_uses_update_flow
 printf 'ok - upgrade self alias uses update flow\n'
 
@@ -1220,6 +1307,9 @@ printf 'ok - claude local can install session hook\n'
 test_session_start_hook_respects_project_marker
 printf 'ok - session start hook respects project marker\n'
 
+test_session_start_hook_resolves_missing_legacy_kit_profile
+printf 'ok - session start hook resolves missing legacy kit profile\n'
+
 test_session_start_hook_outputs_codex_json
 printf 'ok - session start hook outputs Codex JSON\n'
 
@@ -1261,6 +1351,12 @@ printf 'ok - pack includes changed file excerpts\n'
 
 test_pack_sorts_changed_files_by_goal
 printf 'ok - pack sorts changed files by goal\n'
+
+test_pack_falls_back_from_missing_legacy_kit_profile
+printf 'ok - pack falls back from missing legacy kit profile\n'
+
+test_pack_rejects_missing_non_kit_profile
+printf 'ok - pack rejects missing non-kit profile\n'
 
 test_pack_uses_model_preset_budget
 printf 'ok - pack uses model preset budget\n'

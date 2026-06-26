@@ -16,6 +16,7 @@ bin/agent-rails --version
 VERSION                         # Agent Rails kit 版本单一来源
 CHANGELOG.md                    # 版本更新记录
 docs/development-milestones.md  # 开发里程碑和近期演进重点
+install.sh                      # 用户模式 bootstrap 安装脚本
 bin/agent-rails                 # CLI 入口
 scripts/agent-context-pack.sh   # 生成 Task Pack
 scripts/agent-run.sh            # 串起 pack/estimate/check/memory curator 的本地 wrapper
@@ -46,7 +47,33 @@ templates/task-pack.md          # Task Pack 模板
 
 ## Quick Start
 
-先初始化本地命令：
+如果只是使用 Agent Rails，不需要手动 clone 源码。用户模式会把 kit 安装到 `~/.agent-rails/kit`，并把 CLI 链接到 `~/.agent-rails/bin/agent-rails`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/948462448/agent-rails/main/install.sh | bash
+```
+
+然后把 CLI 目录放进 PATH：
+
+```bash
+export PATH="$HOME/.agent-rails/bin:$PATH"
+```
+
+后续升级用户模式安装：
+
+```bash
+agent-rails self update
+```
+
+也可以让常规 update 在非 git 安装中自动走 tarball self-update：
+
+```bash
+agent-rails update \
+  --project /path/to/project \
+  --session-hook
+```
+
+如果你在开发 Agent Rails 本身，仍然使用源码 checkout：
 
 ```bash
 cd /Users/songlei/workspace/agent-rails
@@ -332,7 +359,19 @@ agent-rails update \
   --session-hook
 ```
 
-`update` 会对 kit 执行 `git pull --ff-only`，跑 `bash tests/run.sh`，对目标项目执行 `doctor`，然后刷新 Claude adapter/skills，再跑一次 `doctor`。如果只想刷新目标项目 adapter，不想 pull/test 整个 kit，可以用：
+`update` 在源码 checkout 中会对 kit 执行 `git pull --ff-only`，跑 `bash tests/run.sh`，对目标项目执行 `doctor`，然后刷新 Claude adapter/skills，再跑一次 `doctor`。在 `~/.agent-rails/kit` 这类非 git 用户安装中，它会改走 `agent-rails self update` 的 tarball 更新路径，然后继续后面的 test/doctor/adapter refresh 流程。
+
+用户安装可以显式指定来源：
+
+```bash
+agent-rails self install \
+  --source https://github.com/948462448/agent-rails/archive/refs/heads/main.tar.gz
+
+agent-rails self update \
+  --source https://github.com/948462448/agent-rails/archive/refs/heads/main.tar.gz
+```
+
+如果只想刷新目标项目 adapter，不想 pull/update/test 整个 kit，可以用：
 
 ```bash
 agent-rails doctor \

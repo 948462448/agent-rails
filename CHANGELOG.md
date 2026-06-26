@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - 2026-06-26
+
+- Added `install.sh`, `agent-rails self install`, and `agent-rails self update` for user-mode installs under `~/.agent-rails/kit` without requiring a manual git clone.
+- Added tarball, URL, and local directory install sources, with `~/.agent-rails/bin/agent-rails` as the user-facing CLI entrypoint.
+- Updated `agent-rails update` to keep git checkout updates unchanged while falling back to tarball self-update when the current kit is not a git repository.
+- Made the CLI resolve symlinked entrypoints back to the real kit directory, which enables `~/.agent-rails/bin/agent-rails` wrappers.
+- Added regression coverage for local tarball install/update and non-git update fallback.
+
 ## 0.5.0 - 2026-06-26
 
 - Removed OpenEval-specific docs, profiles, local memory cards, shell variables, and test examples from the generic Agent Rails kit.

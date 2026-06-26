@@ -65,6 +65,11 @@ assert_file_not_exists() {
   fi
 }
 
+make_agent_rails_archive() {
+  local archive="$1"
+  tar -C "$ROOT_DIR" --exclude './.git' --exclude '.git' -czf "$archive" .
+}
+
 test_init_prints_shell_setup() {
   local output
 
@@ -154,6 +159,79 @@ test_upgrade_self_alias_uses_update_flow() {
   assert_contains "$output" "Skip pre-upgrade doctor (--skip-doctor)."
   assert_contains "$output" "Skip adapter upgrade (--skip-adapter)."
   assert_contains "$output" "Agent Rails update complete."
+}
+
+test_self_install_from_local_tarball() {
+  local archive="$TMP_ROOT/agent-rails-self-install.tar.gz"
+  local install_dir="$TMP_ROOT/self-install-kit"
+  local bin_dir="$TMP_ROOT/self-install-bin"
+  local output version_output linked_output
+  make_agent_rails_archive "$archive"
+
+  output="$("$AGENT_RAILS_BIN" self install --install-dir "$install_dir" --bin-dir "$bin_dir" --source "$archive")"
+  version_output="$("$install_dir/bin/agent-rails" --version)"
+  linked_output="$("$bin_dir/agent-rails" --version)"
+
+  assert_contains "$output" "Agent Rails Self INSTALL"
+  assert_contains "$output" "Installed Agent Rails $EXPECTED_AGENT_RAILS_VERSION"
+  assert_contains "$version_output" "agent-rails $EXPECTED_AGENT_RAILS_VERSION"
+  assert_contains "$linked_output" "agent-rails $EXPECTED_AGENT_RAILS_VERSION"
+  assert_file_not_exists "$install_dir/.git"
+}
+
+test_bootstrap_install_from_local_tarball() {
+  local archive="$TMP_ROOT/agent-rails-bootstrap-install.tar.gz"
+  local install_dir="$TMP_ROOT/bootstrap-install-kit"
+  local bin_dir="$TMP_ROOT/bootstrap-install-bin"
+  local output linked_output
+  make_agent_rails_archive "$archive"
+
+  output="$(bash "$ROOT_DIR/install.sh" --install-dir "$install_dir" --bin-dir "$bin_dir" --source "$archive")"
+  linked_output="$("$bin_dir/agent-rails" --version)"
+
+  assert_contains "$output" "Agent Rails Bootstrap Install"
+  assert_contains "$output" "Installed Agent Rails $EXPECTED_AGENT_RAILS_VERSION"
+  assert_contains "$linked_output" "agent-rails $EXPECTED_AGENT_RAILS_VERSION"
+}
+
+test_self_update_from_local_tarball() {
+  local archive="$TMP_ROOT/agent-rails-self-update.tar.gz"
+  local install_dir="$TMP_ROOT/self-update-kit"
+  local bin_dir="$TMP_ROOT/self-update-bin"
+  local output
+  make_agent_rails_archive "$archive"
+  "$AGENT_RAILS_BIN" self install --install-dir "$install_dir" --bin-dir "$bin_dir" --source "$archive" >/dev/null
+
+  output="$("$bin_dir/agent-rails" self update --install-dir "$install_dir" --bin-dir "$bin_dir" --source "$archive")"
+
+  assert_contains "$output" "Agent Rails Self UPDATE"
+  assert_contains "$output" "Updated Agent Rails $EXPECTED_AGENT_RAILS_VERSION"
+}
+
+test_update_uses_self_update_for_non_git_install() {
+  local archive="$TMP_ROOT/agent-rails-non-git-update.tar.gz"
+  local install_dir="$TMP_ROOT/non-git-update-kit"
+  local bin_dir="$TMP_ROOT/non-git-update-bin"
+  local home="$TMP_ROOT/home-non-git-update"
+  local repo="$TMP_ROOT/non-git-update-project"
+  local install_abs output
+  make_agent_rails_archive "$archive"
+  "$AGENT_RAILS_BIN" self install --install-dir "$install_dir" --bin-dir "$bin_dir" --source "$archive" >/dev/null
+  install_abs="$(cd "$install_dir" && pwd)"
+  mkdir -p "$repo" "$home"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  assert_file_not_exists "$install_dir/.git"
+
+  output="$(env -u AGENT_RAILS_HOME HOME="$home" "$bin_dir/agent-rails" update --project "$repo" --kit-source "$archive" --skip-tests --skip-doctor --skip-adapter --dry-run)"
+
+  assert_contains "$output" "Agent Rails Update"
+  assert_contains "$output" "Update Agent Rails kit"
+  assert_contains "$output" "agent-self-install.sh update"
+  assert_contains "$output" "--install-dir $install_abs"
+  assert_contains "$output" "--source $archive"
 }
 
 test_codex_install_and_uninstall_dry_run() {
@@ -1246,6 +1324,18 @@ printf 'ok - update falls back from missing legacy kit profile\n'
 
 test_upgrade_self_alias_uses_update_flow
 printf 'ok - upgrade self alias uses update flow\n'
+
+test_self_install_from_local_tarball
+printf 'ok - self install from local tarball\n'
+
+test_bootstrap_install_from_local_tarball
+printf 'ok - bootstrap install from local tarball\n'
+
+test_self_update_from_local_tarball
+printf 'ok - self update from local tarball\n'
+
+test_update_uses_self_update_for_non_git_install
+printf 'ok - update uses self update for non-git install\n'
 
 test_codex_install_and_uninstall_dry_run
 printf 'ok - codex install/uninstall dry-run\n'

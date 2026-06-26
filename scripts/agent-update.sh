@@ -5,11 +5,11 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
+Usage: agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--kit-source URL|PATH] [--kit-ref REF] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
        agent-rails upgrade self [same options]
 
 Runs a safe local update loop:
-  git pull --ff-only for the Agent Rails kit
+  git pull --ff-only for source checkouts, or tarball self-update for user installs
   bash tests/run.sh
   doctor on the target project
   refresh the target adapter and bundled skills
@@ -34,6 +34,8 @@ skip_tests=0
 skip_doctor=0
 skip_adapter=0
 dry_run=0
+kit_source=""
+kit_ref=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +64,16 @@ while [[ $# -gt 0 ]]; do
     --global-reminder)
       global_reminder=1
       shift
+      ;;
+    --kit-source)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      kit_source="$2"
+      shift 2
+      ;;
+    --kit-ref)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      kit_ref="$2"
+      shift 2
       ;;
     --skip-pull)
       skip_pull=1
@@ -140,8 +152,8 @@ resolve_project() {
 pull_command() {
   local branch upstream
   if ! git -C "$AGENT_RAILS_HOME" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    printf 'Agent Rails home is not a git repository: %s\n' "$AGENT_RAILS_HOME" >&2
-    exit 2
+    self_update_command
+    return 0
   fi
 
   if [[ "$dry_run" -ne 1 && -n "$(git -C "$AGENT_RAILS_HOME" status --porcelain)" ]]; then
@@ -158,6 +170,23 @@ pull_command() {
   fi
 }
 
+agent_self_update_args() {
+  AGENT_SELF_UPDATE_ARGS=(update --install-dir "$AGENT_RAILS_HOME" --bin-dir "$AGENT_RAILS_CONFIG_HOME/bin")
+  [[ -n "$kit_source" ]] && AGENT_SELF_UPDATE_ARGS+=(--source "$kit_source")
+  [[ -n "$kit_ref" ]] && AGENT_SELF_UPDATE_ARGS+=(--ref "$kit_ref")
+  [[ "$dry_run" -eq 1 ]] && AGENT_SELF_UPDATE_ARGS+=(--dry-run)
+}
+
+self_update_command() {
+  agent_self_update_args
+  print_command "$AGENT_RAILS_HOME/scripts/agent-self-install.sh" "${AGENT_SELF_UPDATE_ARGS[@]}"
+}
+
+run_self_update() {
+  agent_self_update_args
+  run_step "Update Agent Rails kit from install source" "$AGENT_RAILS_HOME/scripts/agent-self-install.sh" "${AGENT_SELF_UPDATE_ARGS[@]}"
+}
+
 run_pull() {
   local branch upstream
   if [[ "$skip_pull" -eq 1 ]]; then
@@ -171,8 +200,8 @@ run_pull() {
   fi
 
   if ! git -C "$AGENT_RAILS_HOME" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    printf 'Agent Rails home is not a git repository: %s\n' "$AGENT_RAILS_HOME" >&2
-    exit 2
+    run_self_update
+    return 0
   fi
   if [[ -n "$(git -C "$AGENT_RAILS_HOME" status --porcelain)" ]]; then
     printf 'Agent Rails kit has local changes; commit/stash them or pass --skip-pull.\n' >&2

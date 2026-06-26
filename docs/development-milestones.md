@@ -29,8 +29,14 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Added fallback for old adapters that still reference deleted kit-local profiles such as `profiles/open-eval.profile`.
 - Centralized profile resolution across command entrypoints and startup-hook output.
 
+## 0.6.0 - User Install Mode
+
+- Added `install.sh` and `agent-rails self install` to install the kit into `~/.agent-rails/kit` without requiring a manual source checkout.
+- Added `agent-rails self update` and non-git `agent-rails update` fallback for tarball-based user installs.
+- Kept source checkout mode as the development path, where updates still use `git pull --ff-only` plus the full test/doctor loop.
+
 ## Near-Term Backlog
 
 - Add a clearer repair command or doctor warning for stale adapter profile paths.
 - Investigate Task Pack overwrite warnings under `~/.agent-rails/agent-context`.
-- Keep release docs focused on personal install, upgrade, verify, and rollback flows.
+- Keep release docs focused on verify and rollback flows.

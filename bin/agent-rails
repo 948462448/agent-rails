@@ -3,7 +3,16 @@
 
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source_path="${BASH_SOURCE[0]}"
+while [[ -L "$source_path" ]]; do
+  source_dir="$(cd "$(dirname "$source_path")" && pwd)"
+  source_target="$(readlink "$source_path")"
+  case "$source_target" in
+    /*) source_path="$source_target" ;;
+    *) source_path="$source_dir/$source_target" ;;
+  esac
+done
+script_dir="$(cd "$(dirname "$source_path")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 export AGENT_RAILS_HOME
 # shellcheck source=scripts/agent-paths.sh
@@ -15,11 +24,12 @@ export AGENT_RAILS_VERSION
 usage() {
   cat <<'USAGE'
 Usage:
-  agent-rails --version
-  agent-rails version
-  agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
-  agent-rails upgrade self [update args...]
-  agent-rails init [--shell zsh|bash|fish] [--project PATH] [--profile PATH]
+	  agent-rails --version
+	  agent-rails version
+	  agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--kit-source URL|PATH] [--kit-ref REF] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
+	  agent-rails upgrade self [update args...]
+	  agent-rails self install|update [--install-dir PATH] [--bin-dir PATH] [--source URL|PATH] [--ref REF] [--dry-run]
+	  agent-rails init [--shell zsh|bash|fish] [--project PATH] [--profile PATH]
   agent-rails pack [--project PATH] [agent-context-pack args...]
   agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [goal text...]
   agent-rails check [--project PATH] [agent-check args...]
@@ -38,10 +48,12 @@ Usage:
   agent-rails home
 
 Examples:
-  agent-rails --version
-  agent-rails update --project /path/to/project --session-hook
-  agent-rails upgrade self --project /path/to/project --skip-pull
-  agent-rails init
+	  agent-rails --version
+	  agent-rails update --project /path/to/project --session-hook
+	  agent-rails upgrade self --project /path/to/project --skip-pull
+	  agent-rails self install --source https://github.com/948462448/agent-rails/archive/refs/heads/main.tar.gz
+	  agent-rails self update
+	  agent-rails init
   agent-rails pack --project /path/to/project "review current changes"
   agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "review current changes"
   agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode lite "POC deploy prep"
@@ -112,9 +124,9 @@ case "$command" in
   update)
     "$AGENT_RAILS_HOME/scripts/agent-update.sh" "$@"
     ;;
-  upgrade)
-    subcommand="${1:-}"
-    case "$subcommand" in
+	  upgrade)
+	    subcommand="${1:-}"
+	    case "$subcommand" in
       self)
         shift
         "$AGENT_RAILS_HOME/scripts/agent-update.sh" "$@"
@@ -126,9 +138,12 @@ case "$command" in
         usage >&2
         exit 2
         ;;
-    esac
-    ;;
-  init)
+	    esac
+	    ;;
+	  self)
+	    "$AGENT_RAILS_HOME/scripts/agent-self-install.sh" "$@"
+	    ;;
+	  init)
     "$AGENT_RAILS_HOME/scripts/agent-init-shell.sh" "$@"
     ;;
   pack)

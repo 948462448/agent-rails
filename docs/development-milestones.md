@@ -29,8 +29,18 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Added fallback for old adapters that still reference deleted kit-local profiles such as `profiles/open-eval.profile`.
 - Centralized profile resolution across command entrypoints and startup-hook output.
 
+## Unreleased - Local Adapters And Release Safety
+
+- Added a first-class, project-local OpenCode adapter with install, doctor, and uninstall lifecycle commands.
+- Made generated Claude adapter files safely refreshable while preserving user-authored content outside managed blocks.
+- Added repository/worktree profile-boundary guidance to SessionStart and Task Packs.
+- Hardened Task Pack permissions to `0600` and documented sensitive-output handling.
+- Made publish checks require an explicit deployed-source baseline when the implicit deployment delta cannot be established.
+- Recorded the design, tradeoffs, verification, and follow-ups in [Local Adapters And Release Safety](./local-adapters-and-release-safety.md).
+
 ## Near-Term Backlog
 
 - Add a clearer repair command or doctor warning for stale adapter profile paths.
-- Investigate Task Pack overwrite warnings under `~/.agent-rails/agent-context`.
+- Add a format-aware sensitive-content guard for generated Task Packs and diagnostic output.
+- Add an optional publish receipt for artifact, configuration, and smoke-test evidence.
 - Keep release docs focused on personal install, upgrade, verify, and rollback flows.

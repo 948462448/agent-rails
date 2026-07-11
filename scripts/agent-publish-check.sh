@@ -20,6 +20,7 @@ agent_rails_init_paths
 
 profile_path_arg=""
 base_ref=""
+base_ref_explicit=0
 target_ref="HEAD"
 target_ref_explicit=0
 scan_secrets=1
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
     --base)
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       base_ref="$2"
+      base_ref_explicit=1
       shift 2
       ;;
     --target-ref)
@@ -93,6 +95,15 @@ fi
 
 if [[ -z "$BASE_REF" ]]; then
   BASE_REF="$(resolve_default_base_ref || true)"
+fi
+
+deployment_delta_unresolved=0
+if [[ "$base_ref_explicit" -eq 0 ]]; then
+  if [[ -z "$BASE_REF" ]]; then
+    deployment_delta_unresolved=1
+  elif [[ "$(git rev-parse "$BASE_REF")" == "$(git rev-parse "$TARGET_REF")" ]]; then
+    deployment_delta_unresolved=1
+  fi
 fi
 
 if [[ -n "$BASE_REF" ]] && git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
@@ -287,12 +298,18 @@ printf 'Origin: %s\n' "${remote_url:-none}"
 printf 'Base ref: %s\n' "${BASE_REF:-none}"
 printf 'Target ref: %s\n' "$TARGET_REF"
 printf 'Merge base: %s\n' "${merge_base:0:12}"
+if [[ "$deployment_delta_unresolved" -eq 1 ]]; then
+  printf 'Deployment delta: UNRESOLVED (implicit base is missing or already equals target)\n'
+  printf 'Deployment baseline action: pass --base <currently-deployed-source-revision> before claiming release readiness.\n'
+fi
 if [[ "$target_ref_explicit" -eq 1 ]]; then
   printf 'Mode: target ref only for committed diff; working tree status is still shown.\n'
 fi
 
 printf '\nCommitted change scope:\n'
-if [[ -s "$committed_paths_file" ]]; then
+if [[ "$deployment_delta_unresolved" -eq 1 ]]; then
+  printf -- '- Deployment delta unresolved; the push/upstream baseline is not proof of the currently deployed revision.\n'
+elif [[ -s "$committed_paths_file" ]]; then
   sed 's/^/- /' "$committed_paths_file"
 else
   printf -- '- None against base.\n'
@@ -330,5 +347,8 @@ awk '
 ' "$check_output_file"
 
 printf '\nPublish next steps:\n'
+if [[ "$deployment_delta_unresolved" -eq 1 ]]; then
+  printf -- '- Resolve the deployed source baseline with --base before treating this check as release readiness evidence.\n'
+fi
 printf -- '- Review the changed file scope and secret scan warnings.\n'
 printf -- '- Stage only intentional files, commit with a scope that matches this summary, run required checks, then push.\n'

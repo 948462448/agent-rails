@@ -180,6 +180,55 @@ test_codex_install_and_uninstall_dry_run() {
   assert_contains "$output" "codex plugin remove agent-rails@agent-rails-local"
 }
 
+test_opencode_install_doctor_and_uninstall() {
+  local repo="$TMP_ROOT/opencode-install"
+  local repo_abs
+  local output
+  local exclude_path
+  mkdir -p "$repo"
+  repo_abs="$(cd "$repo" && pwd -P)"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  output="$("$AGENT_RAILS_BIN" opencode install --project "$repo")"
+
+  assert_contains "$output" "Agent Rails opencode Install"
+  assert_contains "$output" "opencode adapter ready"
+  assert_contains "$output" "Restart opencode"
+  assert_file_contains "$repo/.opencode/opencode.json" "\"$repo_abs/.opencode/AGENT_RAILS.md\""
+  assert_file_contains "$repo/.opencode/AGENT_RAILS.md" "Visible session marker protocol"
+  assert_file_contains "$repo/.opencode/command/agent-rails-pack.md" '$ARGUMENTS'
+  assert_file_contains "$repo/.opencode/command/agent-rails-lite.md" "--pack-mode lite"
+  assert_file_contains "$repo/.opencode/command/agent-rails-check.md" "CHECK-ONLY"
+  assert_file_contains "$repo/.opencode/skills/agent-context-pack/SKILL.md" "agent-context-pack"
+
+  exclude_path="$(git -C "$repo" rev-parse --git-path info/exclude)"
+  case "$exclude_path" in
+    /*) ;;
+    *) exclude_path="$repo/$exclude_path" ;;
+  esac
+  assert_file_contains "$exclude_path" ".opencode/opencode.json"
+  assert_file_contains "$exclude_path" ".opencode/skills/agent-*/"
+
+  output="$("$AGENT_RAILS_BIN" opencode doctor --project "$repo")"
+  assert_contains "$output" "Agent Rails opencode Doctor"
+  assert_contains "$output" "[OK] opencode Agent Rails guide"
+  assert_contains "$output" "[OK] opencode config loads Agent Rails instructions"
+
+  output="$("$AGENT_RAILS_BIN" opencode uninstall --project "$repo" --dry-run)"
+  assert_contains "$output" "Agent Rails opencode Uninstall"
+  assert_contains "$output" "Would remove Agent Rails instructions"
+  assert_contains "$output" "Would remove $repo_abs/.opencode/AGENT_RAILS.md"
+
+  "$AGENT_RAILS_BIN" opencode uninstall --project "$repo" >/dev/null
+  assert_file_not_exists "$repo/.opencode/opencode.json"
+  assert_file_not_exists "$repo/.opencode/AGENT_RAILS.md"
+  assert_file_not_exists "$repo/.opencode/command/agent-rails-pack.md"
+  assert_file_not_exists "$repo/.opencode/skills/agent-context-pack"
+}
+
 test_agent_check_includes_bin_entrypoint() {
   local repo="$TMP_ROOT/check-bin"
   local output
@@ -253,6 +302,37 @@ test_publish_check_summarizes_scope_and_redacts_secrets() {
   assert_not_contains "$output" "TIKTOKEN_ENCODING=<redacted>"
   assert_not_contains "$output" "OPENMEMORY_TOKEN_ENV=<redacted>"
   assert_contains "$output" "Suggested verification:"
+}
+
+test_publish_check_requires_deployed_baseline_when_upstream_equals_target() {
+  local repo="$TMP_ROOT/publish-baseline"
+  local remote="$TMP_ROOT/publish-baseline.git"
+  local deployed_sha
+  local output
+  mkdir -p "$repo"
+  git init --bare -q "$remote"
+  git -C "$repo" init -q
+  printf '# v1\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" v1
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" push -q -u origin main
+  deployed_sha="$(git -C "$repo" rev-parse HEAD)"
+
+  printf '\nv2\n' >> "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" v2
+  git -C "$repo" push -q
+
+  output="$("$AGENT_RAILS_BIN" publish check --project "$repo")"
+  assert_contains "$output" "Deployment delta: UNRESOLVED"
+  assert_contains "$output" "pass --base <currently-deployed-source-revision>"
+  assert_contains "$output" "push/upstream baseline is not proof"
+
+  output="$("$AGENT_RAILS_BIN" publish check --project "$repo" --base "$deployed_sha")"
+  assert_not_contains "$output" "Deployment delta: UNRESOLVED"
+  assert_contains "$output" "README.md"
 }
 
 test_estimate_uses_model_preset() {
@@ -330,6 +410,8 @@ test_run_generates_pack_and_instructions() {
     printf 'PROJECT_NAME="run-loop"\n'
     printf 'TASK_PACK_PATH="%s"\n' "$output_path"
   } > "$profile"
+  printf 'stale pack\n' > "$output_path"
+  chmod 644 "$output_path"
 
   output="$("$AGENT_RAILS_BIN" run --project "$repo" --profile "$profile" --model glm5.1 --pack-mode normal --tokenizer char "run loop")"
 
@@ -344,6 +426,20 @@ test_run_generates_pack_and_instructions() {
   assert_file_not_contains "$output_path" "AGENT RAILS: CHECK-ONLY"
   assert_file_contains "$output_path" "## Changed File Priority"
   assert_file_contains "$output_path" "### Grill Gate"
+  assert_file_contains "$output_path" "### Target Scope Rules"
+  assert_file_contains "$output_path" "do not reuse the current --profile"
+  assert_file_contains "$output_path" "### Sensitive Output Rules"
+  assert_file_contains "$output_path" "Base64 and URL encoding are transport encodings, not redaction"
+  local pack_mode
+  if pack_mode="$(stat -f '%Lp' "$output_path" 2>/dev/null)"; then
+    :
+  else
+    pack_mode="$(stat -c '%a' "$output_path")"
+  fi
+  if [[ "$pack_mode" != "600" ]]; then
+    printf 'Expected Task Pack mode 600, got %s for %s.\n' "$pack_mode" "$output_path" >&2
+    exit 1
+  fi
 }
 
 test_run_infers_deep_for_refactor_goal() {
@@ -550,6 +646,30 @@ test_claude_install_refresh_and_uninstall() {
   fi
 }
 
+test_claude_install_refreshes_generated_adapter_without_force() {
+  local repo="$TMP_ROOT/claude-refresh-generated"
+  local profile="$TMP_ROOT/claude-refresh-generated.profile"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  {
+    printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
+    printf 'PROJECT_NAME="profile-refresh"\n'
+  } > "$profile"
+
+  "$AGENT_RAILS_BIN" claude install --project "$repo" --mode local >/dev/null
+  "$AGENT_RAILS_BIN" claude install --project "$repo" --profile "$profile" --mode local >/dev/null
+
+  assert_file_contains "$repo/.claude/AGENT_RAILS.md" "--profile \"$profile\""
+  assert_file_contains "$repo/.claude/commands/agent-rails-pack.md" "--profile \"$profile\""
+  assert_file_contains "$repo/.claude/commands/agent-rails-lite.md" "--profile \"$profile\""
+  assert_file_contains "$repo/.claude/commands/agent-rails-check.md" "--profile \"$profile\""
+  assert_file_contains "$repo/CLAUDE.local.md" "--profile \"$profile\""
+  assert_file_not_contains "$repo/.claude/AGENT_RAILS.md" "$ROOT_DIR/profiles/default.profile"
+}
+
 test_claude_upgrade_alias_is_deprecated() {
   local repo="$TMP_ROOT/claude-upgrade-alias"
   local output
@@ -643,12 +763,42 @@ test_session_start_hook_respects_project_marker() {
   assert_contains "$output" "Trigger matrix"
   assert_contains "$output" "agent-rails pack"
   assert_contains "$output" "profiles/default.profile"
+  assert_contains "$output" "Target scope:"
+  assert_contains "$output" "do not reuse this --profile"
+  assert_contains "$output" "Base64 and URL encoding are not redaction"
 
   output="$(CLAUDE_PROJECT_DIR="$plain_repo" "$ROOT_DIR/hooks/agent-rails-session-start.sh")"
   if [[ -n "$output" ]]; then
     printf 'Expected hook to stay quiet without an Agent Rails marker.\n%s\n' "$output" >&2
     exit 1
   fi
+}
+
+test_session_start_hook_prefers_local_marker_profile() {
+  local repo="$TMP_ROOT/session-hook-local-profile"
+  local profile="$TMP_ROOT/session-hook-local-profile.profile"
+  local output
+  mkdir -p "$repo/.claude"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n' > "$profile"
+  cat > "$repo/.claude/AGENT_RAILS.md" <<EOF
+Visible session marker protocol
+
+$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$ROOT_DIR/profiles/default.profile" "<goal>"
+EOF
+  cat > "$repo/CLAUDE.local.md" <<EOF
+<!-- agent-rails:start -->
+$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$profile" "<goal>"
+<!-- agent-rails:end -->
+EOF
+
+  output="$(CLAUDE_PROJECT_DIR="$repo" "$ROOT_DIR/hooks/agent-rails-session-start.sh")"
+
+  assert_contains "$output" "--profile \"$profile\""
+  assert_not_contains "$output" "$ROOT_DIR/profiles/default.profile"
 }
 
 test_session_start_hook_resolves_missing_legacy_kit_profile() {
@@ -690,6 +840,32 @@ test_session_start_hook_outputs_codex_json() {
   assert_contains "$output" '"hookEventName":"SessionStart"'
   printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("Trigger matrix")' >/dev/null
   printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("AGENT RAILS: ON")' >/dev/null
+}
+
+test_session_start_hook_reads_opencode_marker_profile() {
+  local repo="$TMP_ROOT/session-hook-opencode-marker"
+  local profile="$TMP_ROOT/session-hook-opencode.profile"
+  local output
+  mkdir -p "$repo/.opencode"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf 'PROJECT_NAME=opencode-marker\n' > "$profile"
+  cat > "$repo/.opencode/AGENT_RAILS.md" <<EOF
+## Agent Rails
+
+Visible session marker protocol
+
+\`\`\`bash
+$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$profile" "<goal>"
+\`\`\`
+EOF
+
+  output="$(CLAUDE_PROJECT_DIR="$repo" "$ROOT_DIR/hooks/agent-rails-session-start.sh")"
+
+  assert_contains "$output" "AGENT RAILS SESSION HOOK ACTIVE"
+  assert_contains "$output" "--profile \"$profile\""
 }
 
 test_claude_local_allows_tracked_project_claude_files() {
@@ -1277,6 +1453,9 @@ printf 'ok - upgrade self alias uses update flow\n'
 test_codex_install_and_uninstall_dry_run
 printf 'ok - codex install/uninstall dry-run\n'
 
+test_opencode_install_doctor_and_uninstall
+printf 'ok - opencode install/doctor/uninstall\n'
+
 test_agent_check_includes_bin_entrypoint
 printf 'ok - agent-check includes bin/agent-rails\n'
 
@@ -1285,6 +1464,9 @@ printf 'ok - agent-check --run uses child shell\n'
 
 test_publish_check_summarizes_scope_and_redacts_secrets
 printf 'ok - publish check summarizes scope and redacts secrets\n'
+
+test_publish_check_requires_deployed_baseline_when_upstream_equals_target
+printf 'ok - publish check requires deployed baseline when upstream equals target\n'
 
 test_estimate_uses_model_preset
 printf 'ok - estimate uses model preset\n'
@@ -1322,6 +1504,9 @@ printf 'ok - claude install --force replaces existing block\n'
 test_claude_install_refresh_and_uninstall
 printf 'ok - claude install refresh and uninstall lifecycle\n'
 
+test_claude_install_refreshes_generated_adapter_without_force
+printf 'ok - claude install refreshes generated adapter without force\n'
+
 test_claude_upgrade_alias_is_deprecated
 printf 'ok - claude upgrade alias is deprecated\n'
 
@@ -1337,11 +1522,17 @@ printf 'ok - claude local can install session hook\n'
 test_session_start_hook_respects_project_marker
 printf 'ok - session start hook respects project marker\n'
 
+test_session_start_hook_prefers_local_marker_profile
+printf 'ok - session start hook prefers local marker profile\n'
+
 test_session_start_hook_resolves_missing_legacy_kit_profile
 printf 'ok - session start hook resolves missing legacy kit profile\n'
 
 test_session_start_hook_outputs_codex_json
 printf 'ok - session start hook outputs Codex JSON\n'
+
+test_session_start_hook_reads_opencode_marker_profile
+printf 'ok - session start hook reads opencode marker profile\n'
 
 test_claude_local_allows_tracked_project_claude_files
 printf 'ok - claude local allows tracked project Claude files\n'

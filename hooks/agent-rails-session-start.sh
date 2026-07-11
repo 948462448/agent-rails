@@ -59,6 +59,10 @@ if [[ "$has_agent_rails_marker" -ne 1 && -f "$project_root/.claude/AGENT_RAILS.m
   && grep -Fq 'Visible session marker protocol' "$project_root/.claude/AGENT_RAILS.md"; then
   has_agent_rails_marker=1
 fi
+if [[ "$has_agent_rails_marker" -ne 1 && -f "$project_root/.opencode/AGENT_RAILS.md" ]] \
+  && grep -Fq 'Visible session marker protocol' "$project_root/.opencode/AGENT_RAILS.md"; then
+  has_agent_rails_marker=1
+fi
 if [[ "$has_agent_rails_marker" -ne 1 && -f "$project_root/.codex-plugin/plugin.json" ]] \
   && grep -Fq '"name": "agent-rails"' "$project_root/.codex-plugin/plugin.json"; then
   has_agent_rails_marker=1
@@ -70,9 +74,10 @@ fi
 
 profile_path=""
 for source_path in \
-  "$project_root/.claude/AGENT_RAILS.md" \
   "$project_root/CLAUDE.local.md" \
-  "$project_root/CLAUDE.md"; do
+  "$project_root/CLAUDE.md" \
+  "$project_root/.claude/AGENT_RAILS.md" \
+  "$project_root/.opencode/AGENT_RAILS.md"; do
   if [[ -f "$source_path" ]]; then
     profile_path="$(sed -n -E 's/.*--profile "([^"]+)".*/\1/p' "$source_path" | sed -n '1p')"
     [[ -n "$profile_path" ]] && break
@@ -102,6 +107,17 @@ Trigger matrix:
 - Lite pack: POCs, quick prototypes, version/Dockerfile/OSS/deploy prep, codegen freshness checks, or continuation from an existing handbook.
 - Check-only: deploy/release/upload workflows that consume the current branch, and final verification planning.
 - Skip: pure status queries, simple command output, or fixed operations with no repo change and no branch-consumption risk.
+
+Target scope:
+- This injected profile is scoped to the session project root: $project_root
+- If the user names another worktree in the same repository, pass that exact worktree root to pack/check.
+- If work moves to a sibling or different git repository, do not reuse this --profile. Omit --profile for target auto-resolution, or use the adapter/profile owned by that target repository.
+- After changing targets, regenerate the Task Pack and verify its Current Git State before broad reads or edits.
+
+Sensitive output:
+- Base64 and URL encoding are not redaction.
+- For logs, DOM, job tables, and command output, project only the fields needed; do not dump entrypoints, environments, request bodies, or auth-bearing contexts.
+- If sensitive values appear, do not repeat them. Narrow subsequent reads and report the affected surface.
 
 Commands:
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"

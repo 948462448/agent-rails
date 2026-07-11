@@ -187,8 +187,18 @@ write_file() {
   fi
 
   if [[ -e "$path" && "$force" -ne 1 ]]; then
-    printf 'Keeping existing %s (use --force to overwrite).\n' "$path"
-    return 0
+    case "$path" in
+      "$guide_path"|"$pack_command_path"|"$lite_command_path"|"$check_command_path")
+        ;;
+      *)
+        printf 'Keeping existing %s (use --force to overwrite).\n' "$path"
+        return 0
+        ;;
+    esac
+  fi
+
+  if [[ -e "$path" && "$force" -ne 1 ]]; then
+    printf 'Refreshing generated %s\n' "$path"
   fi
 
   if [[ "$dry_run" -eq 1 ]]; then
@@ -343,12 +353,6 @@ write_claude_md_block() {
   claude_md_name="$(basename "$claude_md_path")"
 
   if [[ -f "$claude_md_path" ]] && grep -q '<!-- agent-rails:start -->' "$claude_md_path"; then
-    if [[ "$force" -ne 1 ]]; then
-      printf '%s already contains an Agent Rails block: %s\n' "$claude_md_name" "$claude_md_path"
-      printf 'Use --force to replace it.\n'
-      return 0
-    fi
-
     if [[ "$dry_run" -eq 1 ]]; then
       printf 'Would replace Agent Rails block in %s\n' "$claude_md_path"
       return 0

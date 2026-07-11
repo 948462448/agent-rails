@@ -36,6 +36,15 @@ Build a fast feedback loop before debugging or implementation.
 Prefer vertical slices and tracer bullets over broad horizontal changes.
 Use project domain language from CONTEXT.md and respect ADRs when present.}"
 
+: "${AGENT_RAILS_TARGET_SCOPE_RULES:=The session-injected profile is scoped to the session project root that supplied it.
+When the user names another worktree in the same repository, resolve and pass that exact worktree root before pack/check; the repository profile may still be reused.
+When work moves to a sibling or different git repository, do not reuse the current --profile; omit --profile so the target can auto-resolve, or use the adapter/profile owned by that target repository.
+After any target change, regenerate the Task Pack and verify its Current Git State before broad reads or edits.}"
+
+: "${AGENT_RAILS_SENSITIVE_OUTPUT_RULES:=Base64 and URL encoding are transport encodings, not redaction.
+When inspecting logs, DOM, job tables, or command output, project only the fields needed for the decision; do not broadly dump entrypoints, command lines, environments, request bodies, or auth-bearing contexts.
+If a tool exposes sensitive values, do not repeat them; narrow subsequent reads, report the affected surface, and recommend rotation when live credentials may be compromised.}"
+
 : "${AGENT_RAILS_ROLE_RULES:=Agent Rails should actively shape the work, not only summarize it.
 Use changed-file priority and excerpts to pick the first files to inspect, then verify by reading the real source.
 Use memory cards only when they match the task or changed paths; do not force generic cards into the task.

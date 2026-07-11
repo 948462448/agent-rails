@@ -2,6 +2,7 @@
 # Generate an Agent Rails task pack for the current checkout or a target ref.
 
 set -euo pipefail
+umask 077
 
 usage() {
   printf 'Usage: %s [--profile PATH] [--base REF] [--target-ref REF] [--output PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [--budget CHARS] [--token-budget TOKENS] [goal text...]\n' "$0"
@@ -879,6 +880,9 @@ if [[ "$memory_budget_chars" -gt 0 ]]; then
 fi
 
 mkdir -p "$(dirname "$TASK_PACK_PATH")"
+if [[ -f "$TASK_PACK_PATH" ]]; then
+  chmod 600 "$TASK_PACK_PATH"
+fi
 
 {
   printf '# Agent Task Pack\n\n'
@@ -1006,6 +1010,10 @@ mkdir -p "$(dirname "$TASK_PACK_PATH")"
   printf '\n'
   printf '### Workflow Rules\n\n'
   print_lines_as_bullets "${AGENT_RAILS_WORKFLOW_RULES:-}"
+  printf '\n### Target Scope Rules\n\n'
+  print_lines_as_bullets "${AGENT_RAILS_TARGET_SCOPE_RULES:-}"
+  printf '\n### Sensitive Output Rules\n\n'
+  print_lines_as_bullets "${AGENT_RAILS_SENSITIVE_OUTPUT_RULES:-}"
   printf '\n### Grill Gate\n\n'
   if [[ "$AGENT_RAILS_PACK_MODE" == "lite" ]]; then
     printf -- '- Lite mode active: do not run a full grill; preserve scope, memory, verification, and checklist value.\n'
@@ -1072,6 +1080,7 @@ mkdir -p "$(dirname "$TASK_PACK_PATH")"
   printf -- '- Residual risks\n'
   printf -- '- Next action suggestions: fix / do not fix / later\n'
 } > "$TASK_PACK_PATH"
+chmod 600 "$TASK_PACK_PATH"
 
 printf 'AGENT RAILS: ON (mode=%s, pack=%s)\n' "$AGENT_RAILS_PACK_MODE" "$TASK_PACK_PATH"
 printf 'Wrote %s\n' "$TASK_PACK_PATH"

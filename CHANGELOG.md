@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added `agent-rails opencode install`, `agent-rails opencode doctor`, and `agent-rails opencode uninstall` for a project-local opencode adapter backed by `.opencode/` instructions, commands, and skills.
+- Scoped SessionStart profiles to their source repository, with explicit worktree and sibling-repository guidance.
+- Added sensitive-output rules to SessionStart and Task Packs, and restricted new Task Packs to owner-only file permissions.
+- Added an unresolved deployment-baseline warning when `publish check` would otherwise compare a target to an identical implicit upstream.
+
 ## 0.5.1 - 2026-06-26
 
 - Fixed default Agent Rails config paths leaking from parent processes into child commands, which could make tests that override `HOME` still write under the parent's `AGENT_RAILS_CONFIG_HOME`.

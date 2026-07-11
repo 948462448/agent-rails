@@ -27,6 +27,7 @@ scripts/agent-doctor.sh         # 诊断项目接入状态
 scripts/agent-init-profile.sh   # 生成本地 project profile
 scripts/agent-install-claude.sh # 安装 Claude Code adapter
 scripts/agent-uninstall-claude.sh # 卸载 Claude Code adapter
+scripts/agent-opencode.sh # 安装/检查/卸载 opencode adapter
 hooks/agent-rails-session-start.sh # 可选 Claude Code SessionStart hook
 codex-marketplace/.agents/plugins/marketplace.json # 本地 Codex plugin marketplace
 scripts/agent-memory-suggest.sh # 记录模型 memory 判断，可选写本地 card
@@ -83,6 +84,14 @@ agent-rails publish check \
 ```
 
 它会汇总当前分支相对 base 的文件范围、staged/unstaged/untracked 状态、潜在 secret 命中（输出会打码），并嵌入 `agent-rails check` 的验证建议。这个命令只读，不会 stage、commit 或 push。
+
+部署检查里的 base 应是“当前已部署的源码 revision”，不一定是 upstream。若隐式 base 缺失或已经等于 target，命令会标记 `Deployment delta: UNRESOLVED`，避免把“已经 push”误判成“没有待部署差异”。这时显式传入部署基线：
+
+```bash
+agent-rails publish check \
+  --project /path/to/project \
+  --base <currently-deployed-source-revision>
+```
 
 可以先估算任意文件或文本的近似 token：
 
@@ -148,7 +157,7 @@ agent-rails profile init \
   --project /path/to/project
 ```
 
-生成后的用户级 profile 位于 `~/.agent-rails/profiles/projects/`，后续会被 `pack/run/check/doctor/claude install` 自动发现。也可以显式传入：
+生成后的用户级 profile 位于 `~/.agent-rails/profiles/projects/`，后续会被 `pack/run/check/doctor/claude install/opencode install` 自动发现。也可以显式传入：
 
 ```bash
 agent-rails pack \
@@ -253,6 +262,8 @@ agent-rails claude install \
 
 `--session-hook` 会把一条个人 hook 写入 `~/.claude/settings.json`。hook 在 `startup|resume|clear|compact` 时运行，只在当前 repo 已经有 Agent Rails marker 时输出启动上下文；没有 marker 的项目保持静默。它负责把触发矩阵和 session marker 协议升到 SessionStart context，项目路径、profile 和 slash command 仍由本地 adapter 管理。
 
+SessionStart 注入的 profile 只属于启动线程时的项目。切换同一仓库的 worktree 时应把 `--project` 指向准确 worktree；切换 sibling 或不同 git 仓库时不得沿用当前 `--profile`，应让目标仓库重新解析。hook 还会提醒 agent：base64/URL 编码不是脱敏，读取日志、DOM 或 Job 表格时只投影决策需要的字段。
+
 仓库也带了 `.claude-plugin/plugin.json`、`.codex-plugin/plugin.json` 和 `hooks/claude-hooks.json`。Claude/Codex plugin 形态都复用同一个 SessionStart hook；Codex 模式下 hook 会输出 `hookSpecificOutput.additionalContext` JSON。日常 Claude 个人使用时 `--session-hook` 更直接。安装/卸载 settings hook 需要本机有 `python3`，hook 运行本身只依赖 `bash`。
 
 本地 Codex 安装可以用 repo-local marketplace 封装命令：
@@ -282,6 +293,28 @@ PLUGIN_DATA=/tmp/agent-rails-plugin-data \
 CLAUDE_PROJECT_DIR=/Users/songlei/workspace/agent-rails \
 /Users/songlei/workspace/agent-rails/hooks/agent-rails-session-start.sh
 ```
+
+opencode 使用项目本地 adapter，不修改 `~/.config/opencode`。它会写入 `.opencode/AGENT_RAILS.md`、`.opencode/command/agent-rails-*.md`、`.opencode/skills/agent-*`，并把 `.opencode/opencode.json` 合并为加载 Agent Rails instruction。Git 仓库中同样优先写 `.git/info/exclude`，避免误提交到业务仓库：
+
+```bash
+agent-rails opencode install \
+  --project /path/to/project \
+  --profile ~/.agent-rails/profiles/projects/project.profile
+```
+
+检查 opencode adapter：
+
+```bash
+agent-rails opencode doctor --project /path/to/project
+```
+
+卸载 opencode adapter：
+
+```bash
+agent-rails opencode uninstall --project /path/to/project --dry-run
+```
+
+安装或卸载后需要重启 opencode，已打开的 opencode session 不会热加载新的 `opencode.json`、commands 或 skills。
 
 接入后，agent 应在会话入口显式亮出状态：
 

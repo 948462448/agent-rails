@@ -112,6 +112,7 @@ project_has_marker() {
   [[ -n "${project_abs:-}" ]] || return 1
   [[ -f "$project_abs/.codex-plugin/plugin.json" ]] && return 0
   [[ -f "$project_abs/.claude/AGENT_RAILS.md" ]] && return 0
+  [[ -f "$project_abs/.opencode/AGENT_RAILS.md" ]] && return 0
   grep -q '<!-- agent-rails:start -->' "$project_abs/CLAUDE.local.md" 2>/dev/null && return 0
   grep -q '<!-- agent-rails:start -->' "$project_abs/CLAUDE.md" 2>/dev/null && return 0
   return 1

@@ -33,6 +33,9 @@ Usage:
   agent-rails codex install [--project PATH] [--profile PATH] [--fix-project] [--dry-run]
   agent-rails codex doctor [--project PATH]
   agent-rails codex uninstall [--dry-run]
+  agent-rails opencode install [--project PATH] [--profile PATH] [--dry-run] [--force]
+  agent-rails opencode doctor [--project PATH]
+  agent-rails opencode uninstall [--project PATH] [--dry-run] [--force]
   agent-rails memory suggest [--project PATH] [--profile PATH] [--decision keep|skip|update|merge] [--write-local] [notes...]
   agent-rails skills install --dest PATH [--dry-run] [skill-name...]
   agent-rails home
@@ -62,6 +65,9 @@ Examples:
   agent-rails codex install --project /path/to/project --fix-project
   agent-rails codex doctor --project /path/to/project
   agent-rails codex uninstall --dry-run
+  agent-rails opencode install --project /path/to/project
+  agent-rails opencode doctor --project /path/to/project
+  agent-rails opencode uninstall --project /path/to/project --dry-run
   agent-rails memory suggest --project /path/to/project --decision skip --reason "one-off output"
   agent-rails memory suggest --project /path/to/project --write-local --title "Backend runs on Pandora Boot" "lesson to keep"
   agent-rails skills install --dest /path/to/project/.claude/skills agent-context-pack agent-check
@@ -211,6 +217,9 @@ case "$command" in
     ;;
   codex)
     "$AGENT_RAILS_HOME/scripts/agent-codex.sh" "$@"
+    ;;
+  opencode)
+    "$AGENT_RAILS_HOME/scripts/agent-opencode.sh" "$@"
     ;;
   memory)
     subcommand="${1:-}"

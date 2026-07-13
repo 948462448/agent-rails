@@ -28,12 +28,16 @@ scripts/agent-init-profile.sh   # 生成本地 project profile
 scripts/agent-install-claude.sh # 安装 Claude Code adapter
 scripts/agent-uninstall-claude.sh # 卸载 Claude Code adapter
 scripts/agent-opencode.sh # 安装/检查/卸载 opencode adapter
+scripts/agent-adapter-content.sh # 渲染 Claude/OpenCode guide 与 command 内容
+scripts/agent-sensitive-output.sh # Task Pack/publish 共用的敏感输出识别与脱敏
 hooks/agent-rails-session-start.sh # 可选 Claude Code SessionStart hook
 codex-marketplace/.agents/plugins/marketplace.json # 本地 Codex plugin marketplace
 scripts/agent-memory-suggest.sh # 记录模型 memory 判断，可选写本地 card
 scripts/agent-install-skills.sh # 安装本地 skill 蓝图
 scripts/agent-init-shell.sh     # 打印本地 shell 初始化指引
-tests/run.sh                    # 本地 e2e 回归测试
+tests/run.sh                    # 本地 e2e Suite runner
+tests/lib/test-helpers.sh       # 共享断言和单测试执行 helper
+tests/suites/*.sh               # core/adapters/workflows/context 测试 Suite
 profiles/default.profile        # kit 内置通用默认 profile
 ~/.agent-rails/profiles/projects/*.profile # 用户级项目 profile
 <project>/.agent-rails/profile  # 可选项目级 profile
@@ -75,6 +79,14 @@ agent-rails run \
 ```
 
 `run` 会生成 Task Pack、估算大小，并打印 agent 应该读取 Task Pack、执行检查、结束后运行 memory curator 的指令。它不硬控制 Claude/Codex 内核，只是把本地工作流变成一个稳定入口。对重构、迁移、架构、诊断、review 这类任务，如果你没有显式传 `--pack-mode`，`run` 会自动升到 `deep`。
+
+只需要给其他集成复用验证命令、而不需要重复 Git scope 时，可以使用窄输出 Interface：
+
+```bash
+agent-rails check --project /path/to/project --suggestions-only
+```
+
+完整的 `agent-rails check --print-only` 行为不变；Task Pack 和 `publish check` 内部使用 `--suggestions-only`，避免把已经展示过的 base、target 和 changed files 再注入一次。
 
 发布或 push 前可以跑轻量检查：
 
@@ -127,8 +139,11 @@ agent-rails pack \
   "本次任务目标"
 ```
 
-预算按 profile 中的比例分区，默认是 git 状态 20%、memory 40%、验证建议 20%、固定契约/清单 20%。默认不限制总预算，但本地 memory card 会以内嵌摘要形式进入 Task Pack，默认每张最多 1600 字符。Task Pack 也会摘取前几个文本变更文件，默认 8 个文件、每个最多 4000 字符，帮助 agent 先读关键 diff 附近的内容。没有命中任务或变更路径的本地 memory card 不会被强行塞进 Task Pack。
-变更文件默认按 `smart` 排序：目标词命中、入口文档、Agent Rails 控制脚本、源码、测试和构建配置会被提前，并在 Task Pack 的 `Changed File Priority` 中展示分数和理由。
+预算按 profile 中的比例分区，默认是 git 状态 20%、memory 40%、验证建议 20%、固定契约/清单 20%。默认不限制总预算，但本地 memory card 会以内嵌摘要形式进入 Task Pack，默认每张最多 1600 字符。Task Pack 会为已跟踪文件摘取实际 diff hunk，只有未跟踪文本文件才读取文件前缀；默认最多选择 8 个文件、每个 4000 字符，让相同 token 优先覆盖真实改动。没有命中任务或变更路径的本地 memory card 不会被强行塞进 Task Pack。
+
+摘录在写入 Task Pack 前会经过 Sensitive Output Guard：shell/YAML/JSON 风格的敏感键值、Authorization 头和 PEM private-key block 会被替换成 `<redacted>`，placeholder 和 tokenizer 配置保持可读。这个 guard 与 `publish check` 共用同一套识别规则；Base64/URL 编码仍不视为脱敏，未带敏感键名的高熵内容也不应依赖自动识别。
+
+变更文件默认按 `smart` 排序：路径目标词、实际变更内容、入口文档、Agent Rails 控制脚本、源码、测试和构建配置会共同计分，并在 Task Pack 的 `Changed File Priority` 中展示分数和理由。项目名以及 `agent/task/pack` 等泛词不会参与目标匹配；实际变更搜索最多取 6 个有效目标词、每个文件最多计 2 次，避免排序成本失控。
 
 也可以按模型预设自动选择预算：
 
@@ -211,6 +226,10 @@ AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS=4000
 AGENT_RAILS_CHANGED_FILE_SORT=smart
 ```
 
+`pack-mode` 控制证据密度，不删除能力栏目。默认上限为：`lite` 4 个变更文件、每个 900 字符；`normal` 6 个、每个 1600 字符；`deep` 8 个、每个 2200 字符；`audit` 使用 profile 配置的完整上限（默认 8 个、每个 4000 字符）。本地 memory card 在 `lite/normal/deep` 分别限制到 700/1000/1400 字符，`audit` 使用 profile 值（默认 1600）。截断只发生在完整行边界，不会为了填满预算切断 UTF-8 字符。profile 中更小的值仍然生效；需要超过日常模式密度时显式使用 `audit`。
+
+四种模式都会保留目标、Git 状态、变更优先级与摘录、入口文档、memory、Agent Rails Contract、Grill Gate、验证建议、Subagent Result Contract 和交付清单。`lite` 适合日常快速定向，`normal/deep` 逐步增加源码证据，`audit` 用于确实需要高密度上下文的审计场景。
+
 安装到个人 Claude Code project skills：
 
 ```bash
@@ -229,7 +248,7 @@ agent-rails doctor \
   --profile ~/.agent-rails/profiles/projects/project.profile
 ```
 
-本地模式适合个人开发：生成 `.claude/` 和 `CLAUDE.local.md`，并把它们写入本地 ignore。Git 仓库中优先使用 `.git/info/exclude`，不改业务仓库的 `.gitignore`，也不改团队共享的 `CLAUDE.md`。
+本地模式适合个人开发：生成 `.claude/` 和 `CLAUDE.local.md`，并把它们写入本地 ignore。安装的 skill 名单记录在 `.claude/.agent-rails-managed-skills`，刷新和卸载会保留未被 Agent Rails 管理的同名文件与 skill。Git 仓库中优先使用 `.git/info/exclude`，不改业务仓库的 `.gitignore`，也不改团队共享的 `CLAUDE.md`。
 
 ```bash
 agent-rails claude install \
@@ -260,7 +279,7 @@ agent-rails claude install \
   --session-hook
 ```
 
-`--session-hook` 会把一条个人 hook 写入 `~/.claude/settings.json`。hook 在 `startup|resume|clear|compact` 时运行，只在当前 repo 已经有 Agent Rails marker 时输出启动上下文；没有 marker 的项目保持静默。它负责把触发矩阵和 session marker 协议升到 SessionStart context，项目路径、profile 和 slash command 仍由本地 adapter 管理。
+`--session-hook` 会把一条个人 hook 写入 `~/.claude/settings.json`。hook 在 `startup|resume|clear|compact` 时运行，只在当前 repo 已经有 Agent Rails marker 时输出启动上下文；没有 marker 的项目保持静默。它只注入精简的触发矩阵、session marker、仓库边界和敏感输出护栏；项目细节、完整契约、profile 和 slash command 仍由本地 adapter 与按需 Task Pack 管理，避免每次启动重复注入大段说明。
 
 SessionStart 注入的 profile 只属于启动线程时的项目。切换同一仓库的 worktree 时应把 `--project` 指向准确 worktree；切换 sibling 或不同 git 仓库时不得沿用当前 `--profile`，应让目标仓库重新解析。hook 还会提醒 agent：base64/URL 编码不是脱敏，读取日志、DOM 或 Job 表格时只投影决策需要的字段。
 
@@ -294,7 +313,7 @@ CLAUDE_PROJECT_DIR=/Users/songlei/workspace/agent-rails \
 /Users/songlei/workspace/agent-rails/hooks/agent-rails-session-start.sh
 ```
 
-opencode 使用项目本地 adapter，不修改 `~/.config/opencode`。它会写入 `.opencode/AGENT_RAILS.md`、`.opencode/command/agent-rails-*.md`、`.opencode/skills/agent-*`，并把 `.opencode/opencode.json` 合并为加载 Agent Rails instruction。Git 仓库中同样优先写 `.git/info/exclude`，避免误提交到业务仓库：
+opencode 使用项目本地 adapter，不修改 `~/.config/opencode`。它会写入 `.opencode/AGENT_RAILS.md`、`.opencode/command/agent-rails-*.md`、`.opencode/skills/agent-*`，并把 `.opencode/opencode.json` 合并为加载 Agent Rails instruction。安装的 skill 名单记录在 `.opencode/.agent-rails-managed-skills`；刷新会保留无法识别为 Agent Rails 生成物的同名文件，卸载也只删除清单中的 skill，不会清扫其他 `agent-*` 目录。Git 仓库中同样优先写 `.git/info/exclude`，避免误提交到业务仓库：
 
 ```bash
 agent-rails opencode install \
@@ -485,6 +504,15 @@ evals/
 ```bash
 bash /Users/songlei/workspace/agent-rails/tests/run.sh
 ```
+
+默认按历史顺序运行全部 70 个测试。开发时也可以只跑一个或多个 Test Suite：
+
+```bash
+bash tests/run.sh adapters
+bash tests/run.sh workflows context
+```
+
+可用 Suite 为 `core`、`adapters`、`workflows`、`context`。
 
 ## OpenMemory
 

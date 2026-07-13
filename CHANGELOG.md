@@ -6,6 +6,15 @@
 - Scoped SessionStart profiles to their source repository, with explicit worktree and sibling-repository guidance.
 - Added sensitive-output rules to SessionStart and Task Packs, and restricted new Task Packs to owner-only file permissions.
 - Added an unresolved deployment-baseline warning when `publish check` would otherwise compare a target to an identical implicit upstream.
+- Rejected invalid base refs consistently in `pack`, `check`, and `publish check` instead of silently falling back to an empty diff.
+- Added generated-file ownership markers and exact Claude/OpenCode managed-skill inventories so refresh and uninstall preserve user-authored files and unrelated `agent-*` skills.
+- Extracted generated-file ownership and managed-skill inventory mechanics into a shared Adapter Lifecycle module used by Claude and OpenCode.
+- Extracted Claude/OpenCode guide and command rendering into a shared Adapter Content module with tool-specific guide implementations and shared command bodies.
+- Split the monolithic shell regression runner into selectable core, adapters, workflows, and context Test Suites while preserving the default test order and output.
+- Stopped the automatic `update` flow from forcing Claude adapter overwrites; explicit `doctor --fix` remains the repair path for damaged managed files.
+- Reduced recurring context cost with mode-specific Task Pack evidence caps, compact default contracts, and a smaller SessionStart payload while preserving all capability sections and profile overrides.
+- Made changed-file evidence diff-first and added `check --suggestions-only`, improving changed-line coverage while removing repeated Git scope from Task Pack integrations.
+- Added a shared Sensitive Output Guard for Task Pack and publish integrations, bounded changed-content scoring for more relevant smart-sort excerpts, and UTF-8-safe line-boundary truncation.
 
 ## 0.5.1 - 2026-06-26
 

@@ -212,7 +212,7 @@ fi
 if [[ "$skip_adapter" -eq 1 ]]; then
   printf '\nSkip adapter upgrade (--skip-adapter).\n'
 else
-  upgrade_args=(--force --project "$project_abs" --profile "$profile_path" --mode "$install_mode")
+  upgrade_args=(--project "$project_abs" --profile "$profile_path" --mode "$install_mode")
   [[ "$session_hook" -eq 1 ]] && upgrade_args+=(--session-hook)
   [[ "$global_reminder" -eq 1 ]] && upgrade_args+=(--global-reminder)
   run_step "Refresh target adapter and skills" "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" "${upgrade_args[@]}"

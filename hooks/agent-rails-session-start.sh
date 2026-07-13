@@ -95,37 +95,38 @@ fi
 context="$(cat <<EOF
 AGENT RAILS SESSION HOOK ACTIVE
 
-This project has a local Agent Rails adapter. Treat Agent Rails as active from session start, before broad repository reads or file edits.
+Local adapter active. Before broad reads/edits, choose the smallest useful path and show its marker.
 
 Visible marker protocol:
-- Pack/lite: first tell the user the AGENT RAILS: ON marker printed by the pack command.
-- Check-only: first tell the user AGENT RAILS: CHECK-ONLY (reason=<reason>).
-- Intentional skip: first tell the user AGENT RAILS: SKIPPED (reason=<reason>).
+- Pack/lite: relay the command's AGENT RAILS: ON marker.
+- Check-only: say AGENT RAILS: CHECK-ONLY (reason=<reason>).
+- Skip: say AGENT RAILS: SKIPPED (reason=<reason>).
 
 Trigger matrix:
-- Deep pack: 2+ subprojects, APIs/contracts/schemas/data models, ADRs/handbooks, migrations/refactors, or ambiguous product decisions.
-- Lite pack: POCs, quick prototypes, version/Dockerfile/OSS/deploy prep, codegen freshness checks, or continuation from an existing handbook.
-- Check-only: deploy/release/upload workflows that consume the current branch, and final verification planning.
-- Skip: pure status queries, simple command output, or fixed operations with no repo change and no branch-consumption risk.
+- Deep: cross-subproject, contract/schema/model, ADR, migration/refactor, ambiguous product work.
+- Lite: POC, deploy prep, codegen check, focused continuation.
+- Check-only: branch-consuming deploy/release/upload and final verification planning.
+- Skip: read-only/fixed operations with no repo or branch-consumption risk.
 
 Target scope:
-- This injected profile is scoped to the session project root: $project_root
-- If the user names another worktree in the same repository, pass that exact worktree root to pack/check.
-- If work moves to a sibling or different git repository, do not reuse this --profile. Omit --profile for target auto-resolution, or use the adapter/profile owned by that target repository.
-- After changing targets, regenerate the Task Pack and verify its Current Git State before broad reads or edits.
+- Session root: $project_root
+- Same-repo worktree: pass its exact root to pack/check.
+- Sibling/different repo: do not reuse this --profile; resolve the target's profile.
+- After a target change, regenerate the pack and verify Current Git State.
 
 Sensitive output:
 - Base64 and URL encoding are not redaction.
-- For logs, DOM, job tables, and command output, project only the fields needed; do not dump entrypoints, environments, request bodies, or auth-bearing contexts.
-- If sensitive values appear, do not repeat them. Narrow subsequent reads and report the affected surface.
+- Project only decision fields from logs/DOM/tables/output; avoid auth-bearing context.
+- Do not repeat exposed secrets; narrow reads and report the surface.
 
 Commands:
+ar="$AGENT_RAILS_BIN"
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN pack --project "\$project_root"$profile_arg "<goal>"
-$AGENT_RAILS_BIN pack --project "\$project_root"$profile_arg --pack-mode lite "<goal>"
-$AGENT_RAILS_BIN check --project "\$project_root"$profile_arg --print-only
+"\$ar" pack --project "\$project_root"$profile_arg "<goal>"
+"\$ar" pack --project "\$project_root"$profile_arg --pack-mode lite "<goal>"
+"\$ar" check --project "\$project_root"$profile_arg --print-only
 
-Read the generated Task Pack before continuing. The project-local Agent Rails adapter remains the source for exact project details.
+Read the generated pack. The project adapter remains the source for exact details.
 EOF
 )"
 

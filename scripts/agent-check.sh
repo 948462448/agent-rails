@@ -4,7 +4,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s [--profile PATH] [--base REF] [--target-ref REF] [--run|--print-only]\n' "$0"
+  printf 'Usage: %s [--profile PATH] [--base REF] [--target-ref REF] [--run|--print-only|--suggestions-only]\n' "$0"
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +19,7 @@ base_ref=""
 target_ref="HEAD"
 target_ref_explicit=0
 run_commands=0
+suggestions_only=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       run_commands=0
       shift
       ;;
+    --suggestions-only)
+      suggestions_only=1
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -56,6 +61,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$suggestions_only" -eq 1 && "$run_commands" -eq 1 ]]; then
+  printf '%s\n' '--suggestions-only cannot be combined with --run.' >&2
+  exit 2
+fi
 
 if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   is_git_repo=1
@@ -95,8 +105,13 @@ if [[ "$is_git_repo" -eq 1 ]]; then
     BASE_REF="$(resolve_default_base_ref)"
   fi
 
-  if ! git rev-parse --verify --quiet "$TARGET_REF" >/dev/null; then
+  if ! git rev-parse --verify --quiet "$TARGET_REF^{commit}" >/dev/null; then
     printf 'Target ref not found: %s\n' "$TARGET_REF" >&2
+    exit 2
+  fi
+
+  if [[ -n "$BASE_REF" ]] && ! git rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null; then
+    printf 'Base ref not found: %s\n' "$BASE_REF" >&2
     exit 2
   fi
 
@@ -109,7 +124,7 @@ if [[ "$is_git_repo" -eq 1 ]]; then
     fi
   fi
 
-  if [[ -n "$BASE_REF" ]] && git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
+  if [[ -n "$BASE_REF" ]]; then
     merge_base="$(git merge-base "$TARGET_REF" "$BASE_REF")"
   else
     merge_base="$(git rev-parse "$TARGET_REF")"
@@ -203,8 +218,55 @@ if has_changed '^(bin/agent-rails|scripts/.*\.sh)$'; then
   add_command "shell entrypoints changed" "${VERIFY_SHELL:-bash -n ${shell_files}}"
 fi
 
+if has_changed '^tests/.*\.sh$'; then
+  test_command="${VERIFY_TESTS:-}"
+  if [[ -z "$test_command" ]]; then
+    unmapped_test_file="$(
+      awk '
+        /^tests\/.*\.sh$/ && $0 !~ /^tests\/suites\/(core|adapters|workflows|context)\.sh$/ {
+          print
+          exit
+        }
+      ' "$changed_file_list"
+    )"
+    if [[ -n "$unmapped_test_file" ]]; then
+      test_command="bash tests/run.sh"
+    else
+      changed_test_suites=()
+      changed_test_suite_count=0
+      for test_suite in core adapters workflows context; do
+        if grep -Fxq "tests/suites/$test_suite.sh" "$changed_file_list"; then
+          changed_test_suites+=("$test_suite")
+          changed_test_suite_count=$((changed_test_suite_count + 1))
+        fi
+      done
+      if [[ "$changed_test_suite_count" -gt 0 ]]; then
+        test_command="bash tests/run.sh ${changed_test_suites[*]}"
+      else
+        test_command="bash tests/run.sh"
+      fi
+    fi
+  fi
+  add_command "shell tests changed" "$test_command"
+fi
+
 if [[ -s "$changed_file_list" && ! -s "$commands_file" ]]; then
   add_command "project default" "${VERIFY_PROJECT:-}"
+fi
+
+print_suggested_verification() {
+  if [[ -s "$commands_file" ]]; then
+    while IFS=$'\t' read -r reason command; do
+      printf -- '- [%s] %s\n' "$reason" "$command"
+    done < "$commands_file"
+  else
+    printf -- '- No automated command selected. For docs-only changes, manually review rendered Markdown and links.\n'
+  fi
+}
+
+if [[ "$suggestions_only" -eq 1 ]]; then
+  print_suggested_verification
+  exit 0
 fi
 
 if [[ "${AGENT_RAILS_SUPPRESS_MARKER:-0}" != "1" ]]; then
@@ -228,13 +290,7 @@ else
 fi
 
 printf '\nSuggested verification:\n'
-if [[ -s "$commands_file" ]]; then
-  while IFS=$'\t' read -r reason command; do
-    printf -- '- [%s] %s\n' "$reason" "$command"
-  done < "$commands_file"
-else
-  printf -- '- No automated command selected. For docs-only changes, manually review rendered Markdown and links.\n'
-fi
+print_suggested_verification
 
 printf '\nNext action suggestions:\n'
 printf -- '- Fix: run the suggested command for any touched executable component before merge.\n'

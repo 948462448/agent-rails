@@ -12,6 +12,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-sensitive-output.sh
+source "$AGENT_RAILS_HOME/scripts/agent-sensitive-output.sh"
 agent_rails_init_paths
 
 profile_path_arg=""
@@ -318,17 +320,35 @@ case "$AGENT_RAILS_CHANGED_FILE_SORT" in
   *) AGENT_RAILS_CHANGED_FILE_SORT="smart" ;;
 esac
 
-if [[ "$AGENT_RAILS_PACK_MODE" == "lite" ]]; then
-  if [[ "$AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT" -gt 4 ]]; then
-    AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT=4
+cap_value() {
+  local current="$1"
+  local maximum="$2"
+  if [[ "$current" -gt "$maximum" ]]; then
+    printf '%s\n' "$maximum"
+  else
+    printf '%s\n' "$current"
   fi
-  if [[ "$AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS" -gt 1800 ]]; then
-    AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS=1800
-  fi
-  if [[ "$AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS" -gt 900 ]]; then
-    AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS=900
-  fi
-fi
+}
+
+# Pack modes change evidence density, not capability. Audit preserves profile
+# maxima; the other modes bound repeated excerpts while retaining every section.
+case "$AGENT_RAILS_PACK_MODE" in
+  lite)
+    AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT="$(cap_value "$AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT" 4)"
+    AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS="$(cap_value "$AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS" 900)"
+    AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS="$(cap_value "$AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS" 700)"
+    ;;
+  normal)
+    AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT="$(cap_value "$AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT" 6)"
+    AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS="$(cap_value "$AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS" 1600)"
+    AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS="$(cap_value "$AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS" 1000)"
+    ;;
+  deep)
+    AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT="$(cap_value "$AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT" 8)"
+    AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS="$(cap_value "$AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS" 2200)"
+    AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS="$(cap_value "$AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS" 1400)"
+    ;;
+esac
 
 section_budget() {
   local percent="$1"
@@ -363,10 +383,6 @@ print_file_excerpt() {
       line = $0 "\n"
       len = length(line)
       if (limit > 0 && used + len > limit) {
-        remaining = limit - used
-        if (remaining > 0) {
-          printf "%s", substr(line, 1, remaining)
-        }
         truncated = 1
         exit
       }
@@ -393,6 +409,22 @@ is_text_file_for_excerpt() {
   LC_ALL=C grep -Iq . "$path" 2>/dev/null
 }
 
+write_git_diff_for_path() {
+  local path="$1"
+  local output="$2"
+  : > "$output"
+  [[ "$is_git_repo" -eq 1 ]] || return 0
+
+  git diff --no-ext-diff --no-color --no-prefix --unified=2 \
+    "$merge_base" "$TARGET_REF" -- "$path" >> "$output" 2>/dev/null || true
+  if [[ "$target_ref_explicit" -eq 0 ]]; then
+    git diff --cached --no-ext-diff --no-color --no-prefix --unified=2 \
+      -- "$path" >> "$output" 2>/dev/null || true
+    git diff --no-ext-diff --no-color --no-prefix --unified=2 \
+      -- "$path" >> "$output" 2>/dev/null || true
+  fi
+}
+
 resolve_default_base_ref() {
   local ref
   for ref in origin/main origin/master main master; do
@@ -408,8 +440,13 @@ if [[ "$is_git_repo" -eq 1 ]]; then
     BASE_REF="$(resolve_default_base_ref)"
   fi
 
-  if ! git rev-parse --verify --quiet "$TARGET_REF" >/dev/null; then
+  if ! git rev-parse --verify --quiet "$TARGET_REF^{commit}" >/dev/null; then
     printf 'Target ref not found: %s\n' "$TARGET_REF" >&2
+    exit 2
+  fi
+
+  if [[ -n "$BASE_REF" ]] && ! git rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null; then
+    printf 'Base ref not found: %s\n' "$BASE_REF" >&2
     exit 2
   fi
 
@@ -420,7 +457,7 @@ if [[ "$is_git_repo" -eq 1 ]]; then
   fi
   head_sha="$(git rev-parse --short "$TARGET_REF")"
 
-  if [[ -n "$BASE_REF" ]] && git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
+  if [[ -n "$BASE_REF" ]]; then
     merge_base="$(git merge-base "$TARGET_REF" "$BASE_REF")"
   else
     merge_base="$(git rev-parse "$TARGET_REF")"
@@ -455,16 +492,91 @@ fi
 scored_changed_file_list="$tmp_dir/changed-files-scored"
 sorted_changed_file_list="$tmp_dir/changed-files-sorted"
 if [[ -s "$changed_file_list" && "$AGENT_RAILS_CHANGED_FILE_SORT" == "smart" ]]; then
-  awk -v goal="$goal" '
-    BEGIN {
-      goal_l = tolower(goal)
-      token_count = split(goal_l, raw_tokens, /[^[:alnum:]_.-]+/)
-      for (i = 1; i <= token_count; i++) {
-        token = raw_tokens[i]
-        if (length(token) >= 3) {
-          goal_tokens[token] = 1
+  goal_change_metadata_file="$tmp_dir/goal-change-metadata"
+  untracked_changed_file_list="$tmp_dir/untracked-changed-files"
+  printf 'S\n' > "$goal_change_metadata_file"
+  awk -v goal="$goal" -v project="$PROJECT_NAME" '
+    function case_insensitive_regex(text, result, position, character, lower, upper) {
+      result = ""
+      for (position = 1; position <= length(text); position++) {
+        character = substr(text, position, 1)
+        lower = tolower(character)
+        upper = toupper(character)
+        if (lower != upper) {
+          result = result "[" lower upper "]"
+        } else if (character == ".") {
+          result = result "\\."
+        } else {
+          result = result character
         }
       }
+      return result
+    }
+    BEGIN {
+      split("agent agents rails task pack project repo code change changes work continue continuing optimize optimization reduce reducing keep keeping with without from into this that", stop_words, " ")
+      for (i in stop_words) {
+        ignored[stop_words[i]] = 1
+      }
+      project_count = split(tolower(project), project_tokens, /[^[:alnum:]]+/)
+      for (i = 1; i <= project_count; i++) {
+        if (length(project_tokens[i]) >= 3) {
+          ignored[project_tokens[i]] = 1
+        }
+      }
+      goal_count = split(tolower(goal), raw_tokens, /[^[:alnum:]_.-]+/)
+      selected = 0
+      for (i = 1; i <= goal_count && selected < 6; i++) {
+        token = raw_tokens[i]
+        if (length(token) >= 3 && !ignored[token] && !seen[token]) {
+          print "T\t" token "\t" case_insensitive_regex(token)
+          seen[token] = 1
+          selected++
+        }
+      }
+    }
+  ' >> "$goal_change_metadata_file"
+
+  if [[ "$is_git_repo" -eq 1 && "$target_ref_explicit" -eq 0 ]]; then
+    git ls-files --others --exclude-standard 2>/dev/null | sort -u > "$untracked_changed_file_list"
+  else
+    : > "$untracked_changed_file_list"
+  fi
+
+  while IFS=$'\t' read -r record_type goal_token goal_regex; do
+    [[ "$record_type" == "T" && -n "$goal_token" ]] || continue
+    {
+      if [[ "$is_git_repo" -eq 1 ]]; then
+        git diff --name-only -G"$goal_regex" "$merge_base" "$TARGET_REF" -- 2>/dev/null || true
+        if [[ "$target_ref_explicit" -eq 0 ]]; then
+          git diff --cached --name-only -G"$goal_regex" -- 2>/dev/null || true
+          git diff --name-only -G"$goal_regex" -- 2>/dev/null || true
+        fi
+      fi
+      while IFS= read -r untracked_path; do
+        [[ -f "$untracked_path" ]] || continue
+        if LC_ALL=C grep -Fqi -- "$goal_token" "$untracked_path" 2>/dev/null; then
+          printf '%s\n' "$untracked_path"
+        fi
+      done < "$untracked_changed_file_list"
+    } | awk 'NF' | sort -u | while IFS= read -r matched_path; do
+      printf 'H\t%s\t%s\n' "$matched_path" "$goal_token" >> "$goal_change_metadata_file"
+    done
+  done < <(awk -F '\t' '$1 == "T" { print }' "$goal_change_metadata_file")
+
+  awk -F '\t' '
+    FNR == NR {
+      if ($1 == "T") {
+        goal_tokens[$2] = 1
+      } else if ($1 == "H" && content_match_count[$2] < 2) {
+        content_score[$2] += 45
+        content_match_count[$2]++
+        if (content_reason[$2] == "") {
+          content_reason[$2] = "change:" $3
+        } else {
+          content_reason[$2] = content_reason[$2] ", change:" $3
+        }
+      }
+      next
     }
     function add_reason(text) {
       if (reason == "") {
@@ -489,6 +601,10 @@ if [[ -s "$changed_file_list" && "$AGENT_RAILS_CHANGED_FILE_SORT" == "smart" ]];
           score += 80
           add_reason("goal:" token)
         }
+      }
+      if (content_score[path] > 0) {
+        score += content_score[path]
+        add_reason(content_reason[path])
       }
 
       if (path_l ~ /(^|\/)(agents|claude|readme|context)([-_.a-z0-9]*)?\.md$/) {
@@ -517,7 +633,7 @@ if [[ -s "$changed_file_list" && "$AGENT_RAILS_CHANGED_FILE_SORT" == "smart" ]];
       }
       printf "%06d\t%s\t%s\n", score, path, reason
     }
-  ' "$changed_file_list" | sort -r -k1,1 -k2,2 > "$scored_changed_file_list"
+  ' "$goal_change_metadata_file" "$changed_file_list" | sort -r -k1,1 -k2,2 > "$scored_changed_file_list"
   cut -f2 "$scored_changed_file_list" > "$sorted_changed_file_list"
 else
   awk '{ printf "%06d\t%s\tpath\n", 10, $0 }' "$changed_file_list" > "$scored_changed_file_list"
@@ -551,15 +667,29 @@ changed_file_excerpts_file="$tmp_dir/changed-file-excerpts.md"
 : > "$changed_file_excerpts_file"
 if [[ "$AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT" -gt 0 && "$AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS" -gt 0 && -s "$sorted_changed_file_list" ]]; then
   excerpt_count=0
+  changed_file_diff="$tmp_dir/changed-file.diff"
+  changed_file_safe_excerpt="$tmp_dir/changed-file.safe"
   while IFS= read -r changed_path; do
     [[ -z "$changed_path" ]] && continue
-    if ! is_text_file_for_excerpt "$changed_path"; then
+    write_git_diff_for_path "$changed_path" "$changed_file_diff"
+    if [[ ! -s "$changed_file_diff" ]] && ! is_text_file_for_excerpt "$changed_path"; then
       continue
     fi
     {
       printf '### `%s`\n\n' "$changed_path"
-      printf '~~~text\n'
-      print_file_excerpt "$changed_path" "$AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS"
+      if [[ -s "$changed_file_diff" ]]; then
+        printf '~~~diff\n'
+        excerpt_source="$changed_file_diff"
+        excerpt_format="diff"
+      else
+        printf '~~~text\n'
+        excerpt_source="$changed_path"
+        excerpt_format="text"
+      fi
+      if ! agent_sensitive_redact_file "$excerpt_source" "$changed_file_safe_excerpt" "$excerpt_format"; then
+        printf '[excerpt omitted: sensitive-output guard failed]\n' > "$changed_file_safe_excerpt"
+      fi
+      print_file_excerpt "$changed_file_safe_excerpt" "$AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS"
       printf '~~~\n\n'
     } >> "$changed_file_excerpts_file"
     excerpt_count=$((excerpt_count + 1))
@@ -849,9 +979,9 @@ suggestions_file="$tmp_dir/verification"
 agent_check_script="$AGENT_RAILS_HOME/scripts/agent-check.sh"
 if [[ -x "$agent_check_script" ]]; then
   if [[ "$target_ref_explicit" -eq 1 ]]; then
-    AGENT_RAILS_SUPPRESS_MARKER=1 "$agent_check_script" --profile "$profile_path" --base "$BASE_REF" --target-ref "$TARGET_REF" --print-only > "$suggestions_file" || true
+    AGENT_RAILS_SUPPRESS_MARKER=1 "$agent_check_script" --profile "$profile_path" --base "$BASE_REF" --target-ref "$TARGET_REF" --suggestions-only > "$suggestions_file" || true
   else
-    AGENT_RAILS_SUPPRESS_MARKER=1 "$agent_check_script" --profile "$profile_path" --base "$BASE_REF" --print-only > "$suggestions_file" || true
+    AGENT_RAILS_SUPPRESS_MARKER=1 "$agent_check_script" --profile "$profile_path" --base "$BASE_REF" --suggestions-only > "$suggestions_file" || true
   fi
 else
   printf 'Run agent-rails check after it is available.\n' > "$suggestions_file"
@@ -890,8 +1020,7 @@ fi
 
   printf '## Session Marker\n\n'
   printf 'AGENT RAILS: ON (mode=%s, pack=%s)\n\n' "$AGENT_RAILS_PACK_MODE" "$TASK_PACK_PATH"
-  printf -- '- User-visible opening line: `AGENT RAILS: ON (mode=%s, pack=%s)`.\n' "$AGENT_RAILS_PACK_MODE" "$TASK_PACK_PATH"
-  printf -- '- If this pack is intentionally skipped later, say `AGENT RAILS: SKIPPED (reason=<reason>)` instead of staying silent.\n\n'
+  printf -- '- Relay the marker above before continuing; if intentionally skipped later, say `AGENT RAILS: SKIPPED (reason=<reason>)`.\n\n'
 
   printf '## Goal\n\n%s\n\n' "$goal"
 
@@ -941,8 +1070,8 @@ fi
     printf -- '- Verification suggestions: `%s%%` -> `%s` chars\n' "$AGENT_RAILS_BUDGET_VERIFY_PERCENT" "$verify_budget_chars"
     printf -- '- Contract/checklist: `%s%%` -> `%s` chars\n' "$AGENT_RAILS_BUDGET_CONTRACT_PERCENT" "$contract_budget_chars"
   else
-    printf -- '- Mode: unbounded; set `--model NAME`, `--budget CHARS`, `--token-budget TOKENS`, or `AGENT_RAILS_CONTEXT_BUDGET_CHARS` to enable section budgets.\n'
-    printf -- '- Local memory card excerpt default: `%s` chars per card.\n' "$AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS"
+    printf -- '- Global budget: none; Pack Mode density caps still apply. Set `--model NAME`, `--budget CHARS`, or `--token-budget TOKENS` for section budgets.\n'
+    printf -- '- Local memory card cap: `%s` chars per card.\n' "$AGENT_RAILS_LOCAL_MEMORY_CARD_CHARS"
     printf -- '- Changed file sort: `%s`.\n' "$AGENT_RAILS_CHANGED_FILE_SORT"
     printf -- '- Changed file excerpts: `%s` file(s), `%s` chars each.\n' "$AGENT_RAILS_CHANGED_FILE_EXCERPT_LIMIT" "$AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS"
   fi

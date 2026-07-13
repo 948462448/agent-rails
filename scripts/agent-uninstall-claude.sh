@@ -23,6 +23,8 @@ USAGE
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
+# shellcheck source=scripts/agent-adapter-lifecycle.sh
+source "$AGENT_RAILS_HOME/scripts/agent-adapter-lifecycle.sh"
 
 project="$PWD"
 dry_run=0
@@ -72,6 +74,13 @@ guide_path="$claude_dir/AGENT_RAILS.md"
 pack_command_path="$commands_dir/agent-rails-pack.md"
 lite_command_path="$commands_dir/agent-rails-lite.md"
 check_command_path="$commands_dir/agent-rails-check.md"
+managed_skills_path="$claude_dir/.agent-rails-managed-skills"
+agent_adapter_lifecycle_init \
+  "$guide_path" \
+  "$pack_command_path" \
+  "$lite_command_path" \
+  "$check_command_path" \
+  "$managed_skills_path"
 claude_project_md_path="$project_abs/CLAUDE.md"
 claude_local_md_path="$project_abs/CLAUDE.local.md"
 claude_user_md_path="${AGENT_RAILS_CLAUDE_USER_MD:-$HOME/.claude/CLAUDE.md}"
@@ -87,6 +96,16 @@ say_remove() {
   fi
 }
 
+agent_adapter_load_managed_skills
+legacy_adapter=0
+if [[ ! -f "$managed_skills_path" ]] && {
+  agent_adapter_is_generated_file "$guide_path" \
+    || grep -Fq '<!-- agent-rails:start -->' "$claude_local_md_path" 2>/dev/null \
+    || grep -Fq '<!-- agent-rails:start -->' "$claude_project_md_path" 2>/dev/null
+}; then
+  legacy_adapter=1
+fi
+
 remove_path() {
   local path="$1"
   [[ -e "$path" ]] || return 0
@@ -98,13 +117,40 @@ remove_path() {
   say_remove "$path"
 }
 
+remove_generated_file() {
+  local path="$1"
+  [[ -e "$path" ]] || return 0
+  if ! agent_adapter_is_generated_file "$path"; then
+    printf 'Keeping unmanaged existing file: %s\n' "$path"
+    return 0
+  fi
+  remove_path "$path"
+}
+
 remove_agent_rails_skills() {
   local source_skills_dir="$AGENT_RAILS_HOME/skills"
-  local skill_dir
-  [[ -d "$source_skills_dir" && -d "$skills_dir" ]] || return 0
-  while IFS= read -r skill_dir; do
-    remove_path "$skills_dir/$(basename "$skill_dir")"
-  done < <(find "$source_skills_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+  local index skill_dir skill_name
+  local skills_to_remove=()
+  local skills_to_remove_count=0
+  [[ -d "$skills_dir" ]] || return 0
+
+  if [[ -f "$managed_skills_path" ]]; then
+    while IFS= read -r skill_name; do
+      skills_to_remove+=("$skill_name")
+      skills_to_remove_count=$((skills_to_remove_count + 1))
+    done < <(agent_adapter_list_managed_skills)
+  elif [[ "$legacy_adapter" -eq 1 && -d "$source_skills_dir" ]]; then
+    while IFS= read -r skill_dir; do
+      skills_to_remove+=("$(basename "$skill_dir")")
+      skills_to_remove_count=$((skills_to_remove_count + 1))
+    done < <(find "$source_skills_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+  fi
+
+  for ((index = 0; index < skills_to_remove_count; index++)); do
+    skill_name="${skills_to_remove[$index]}"
+    agent_adapter_is_valid_managed_skill_name "$skill_name" || continue
+    remove_path "$skills_dir/$skill_name"
+  done
 }
 
 remove_agent_rails_block() {
@@ -225,6 +271,7 @@ remove_local_ignore_block() {
     function is_agent_rails_ignore_line(line) {
       return line == ".claude/" ||
         line == ".claude/AGENT_RAILS.md" ||
+        line == ".claude/.agent-rails-managed-skills" ||
         line == ".claude/commands/agent-rails-pack.md" ||
         line == ".claude/commands/agent-rails-lite.md" ||
           line == ".claude/commands/agent-rails-check.md" ||
@@ -253,11 +300,12 @@ remove_local_ignore_block() {
   printf 'Removed Agent Rails local ignore block from %s\n' "$path"
 }
 
-remove_path "$guide_path"
-remove_path "$pack_command_path"
-remove_path "$lite_command_path"
-remove_path "$check_command_path"
+remove_generated_file "$guide_path"
+remove_generated_file "$pack_command_path"
+remove_generated_file "$lite_command_path"
+remove_generated_file "$check_command_path"
 remove_agent_rails_skills
+remove_path "$managed_skills_path"
 remove_agent_rails_block "$claude_local_md_path"
 remove_agent_rails_block "$claude_project_md_path"
 if [[ "$global_reminder" -eq 1 ]]; then

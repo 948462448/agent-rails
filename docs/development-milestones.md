@@ -35,6 +35,9 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Made generated Claude adapter files safely refreshable while preserving user-authored content outside managed blocks.
 - Added repository/worktree profile-boundary guidance to SessionStart and Task Packs.
 - Hardened Task Pack permissions to `0600` and documented sensitive-output handling.
+- Bounded Task Pack evidence density by mode and compacted SessionStart/default contracts to reduce recurring token cost without removing capability sections.
+- Switched tracked-file excerpts to actual diff hunks and deepened Agent Check with a narrow Verification Plan Interface for integrations.
+- Added a shared Sensitive Output Guard, bounded changed-content scoring, and UTF-8-safe truncation so denser Task Packs remain safer and more relevant.
 - Made publish checks require an explicit deployed-source baseline when the implicit deployment delta cannot be established.
 - Recorded the design, tradeoffs, verification, and follow-ups in [Local Adapters And Release Safety](./local-adapters-and-release-safety.md).
 

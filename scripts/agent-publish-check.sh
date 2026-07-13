@@ -16,6 +16,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-sensitive-output.sh
+source "$AGENT_RAILS_HOME/scripts/agent-sensitive-output.sh"
 agent_rails_init_paths
 
 profile_path_arg=""
@@ -88,13 +90,18 @@ resolve_default_base_ref() {
   done
 }
 
-if ! git rev-parse --verify --quiet "$TARGET_REF" >/dev/null; then
+if ! git rev-parse --verify --quiet "$TARGET_REF^{commit}" >/dev/null; then
   printf 'Target ref not found: %s\n' "$TARGET_REF" >&2
   exit 2
 fi
 
 if [[ -z "$BASE_REF" ]]; then
   BASE_REF="$(resolve_default_base_ref || true)"
+fi
+
+if [[ -n "$BASE_REF" ]] && ! git rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null; then
+  printf 'Base ref not found: %s\n' "$BASE_REF" >&2
+  exit 2
 fi
 
 deployment_delta_unresolved=0
@@ -106,7 +113,7 @@ if [[ "$base_ref_explicit" -eq 0 ]]; then
   fi
 fi
 
-if [[ -n "$BASE_REF" ]] && git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
+if [[ -n "$BASE_REF" ]]; then
   merge_base="$(git merge-base "$TARGET_REF" "$BASE_REF")"
 else
   merge_base="$(git rev-parse "$TARGET_REF")"
@@ -133,7 +140,7 @@ awk '
   NF { print path_from_status($0) }
 ' "$status_file" | sort -u > "$status_paths_file"
 
-if [[ -n "$BASE_REF" ]] && git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
+if [[ -n "$BASE_REF" ]]; then
   git diff --name-only "$merge_base"..."$TARGET_REF" | sort -u > "$committed_paths_file"
 else
   : > "$committed_paths_file"
@@ -211,53 +218,7 @@ scan_changed_files_for_secrets() {
     if ! LC_ALL=C grep -Iq . "$rel_path" 2>/dev/null; then
       continue
     fi
-    awk '
-      function trim_value(value) {
-        gsub(/^[[:space:]"'\''`]+/, "", value)
-        gsub(/[[:space:]"'\''`,;]+$/, "", value)
-        return value
-      }
-      function assignment_value(line) {
-        value = line
-        sub(/^[^:=]*[:=][[:space:]]*/, "", value)
-        return trim_value(value)
-      }
-      function is_placeholder(value, lower) {
-        lower = tolower(value)
-        return value == "" ||
-          value ~ /^[$][A-Za-z_][A-Za-z0-9_]*$/ ||
-          value ~ /^[$][{][A-Za-z_][A-Za-z0-9_:-]*[}]$/ ||
-          value ~ /^[A-Z0-9_]+$/ ||
-          lower ~ /^(dummy|example|placeholder|changeme|todo|null|none|redacted)$/
-      }
-      function likely_secret_assignment(line, lower) {
-        lower = tolower(line)
-        if (lower ~ /(tokenizer|tiktoken)/) {
-          return 0
-        }
-        return lower ~ /^[[:space:]]*(export[[:space:]]+)?[a-z_][a-z0-9_.-]*(access[_-]?key|api[_-]?key|secret|token([_-]|$)|cookie|authorization|password|private[_-]?key)[a-z0-9_.-]*[[:space:]]*[:=][[:space:]]*[^[:space:]#]+/
-      }
-      function redact(line) {
-        if (line ~ /=/) {
-          key = line
-          value = line
-          sub(/=.*/, "", key)
-          sub(/^[^=]*=/, "", value)
-          gsub(/[A-Za-z0-9_\/+=.-]{8,}/, "<redacted>", value)
-          return key "=" value
-        }
-        gsub(/[A-Za-z0-9_\/+=.-]{16,}/, "<redacted>", line)
-        return line
-      }
-      {
-        lower = tolower($0)
-        if ($0 ~ /-----BEGIN [A-Z ]*PRIVATE KEY-----/) {
-          printf "%s:%s: %s\n", FILENAME, FNR, redact($0)
-        } else if (likely_secret_assignment($0, lower) && !is_placeholder(assignment_value($0))) {
-          printf "%s:%s: %s\n", FILENAME, FNR, redact($0)
-        }
-      }
-    ' "$rel_path" >> "$secret_findings_file"
+    agent_sensitive_scan_file "$rel_path" >> "$secret_findings_file"
   done < "$changed_paths_file"
 }
 
@@ -271,7 +232,7 @@ if [[ -n "$upstream" ]]; then
   read -r behind ahead < <(git rev-list --left-right --count "$upstream"...HEAD 2>/dev/null || printf 'n/a n/a\n')
 fi
 
-check_args=(--profile "$profile_path" --print-only)
+check_args=(--profile "$profile_path" --suggestions-only)
 if [[ -n "$BASE_REF" ]]; then
   check_args+=(--base "$BASE_REF")
 fi
@@ -340,11 +301,7 @@ else
 fi
 
 printf '\nSuggested verification:\n'
-awk '
-  /^Suggested verification:/ { in_section = 1; next }
-  /^Next action suggestions:/ { in_section = 0 }
-  in_section && NF { print }
-' "$check_output_file"
+cat "$check_output_file"
 
 printf '\nPublish next steps:\n'
 if [[ "$deployment_delta_unresolved" -eq 1 ]]; then

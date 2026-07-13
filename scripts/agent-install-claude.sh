@@ -29,6 +29,10 @@ AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-adapter-lifecycle.sh
+source "$AGENT_RAILS_HOME/scripts/agent-adapter-lifecycle.sh"
+# shellcheck source=scripts/agent-adapter-content.sh
+source "$AGENT_RAILS_HOME/scripts/agent-adapter-content.sh"
 agent_rails_init_paths
 AGENT_RAILS_VERSION="$(agent_rails_version)"
 
@@ -145,6 +149,13 @@ guide_path="$claude_dir/AGENT_RAILS.md"
 pack_command_path="$commands_dir/agent-rails-pack.md"
 lite_command_path="$commands_dir/agent-rails-lite.md"
 check_command_path="$commands_dir/agent-rails-check.md"
+managed_skills_path="$claude_dir/.agent-rails-managed-skills"
+agent_adapter_lifecycle_init \
+  "$guide_path" \
+  "$pack_command_path" \
+  "$lite_command_path" \
+  "$check_command_path" \
+  "$managed_skills_path"
 claude_project_md_path="$project_abs/CLAUDE.md"
 claude_local_md_path="$project_abs/CLAUDE.local.md"
 claude_user_md_path="${AGENT_RAILS_CLAUDE_USER_MD:-$HOME/.claude/CLAUDE.md}"
@@ -189,6 +200,10 @@ write_file() {
   if [[ -e "$path" && "$force" -ne 1 ]]; then
     case "$path" in
       "$guide_path"|"$pack_command_path"|"$lite_command_path"|"$check_command_path")
+        if ! agent_adapter_is_generated_file "$path"; then
+          printf 'Keeping unmanaged existing file: %s\n' "$path"
+          return 0
+        fi
         ;;
       *)
         printf 'Keeping existing %s (use --force to overwrite).\n' "$path"
@@ -198,7 +213,7 @@ write_file() {
   fi
 
   if [[ -e "$path" && "$force" -ne 1 ]]; then
-    printf 'Refreshing generated %s\n' "$path"
+    printf 'Refreshing Agent Rails-generated %s\n' "$path"
   fi
 
   if [[ "$dry_run" -eq 1 ]]; then
@@ -218,6 +233,7 @@ append_local_ignore() {
   if [[ "$dry_run" -eq 1 ]]; then
     printf 'Would ensure local ignore entries in %s\n' "$local_ignore_path"
     printf '  .claude/AGENT_RAILS.md\n'
+    printf '  .claude/.agent-rails-managed-skills\n'
     printf '  .claude/commands/agent-rails-pack.md\n'
     printf '  .claude/commands/agent-rails-lite.md\n'
     printf '  .claude/commands/agent-rails-check.md\n'
@@ -235,6 +251,7 @@ append_local_ignore() {
       function is_agent_rails_ignore_line(line) {
         return line == ".claude/" ||
           line == ".claude/AGENT_RAILS.md" ||
+          line == ".claude/.agent-rails-managed-skills" ||
           line == ".claude/commands/agent-rails-pack.md" ||
           line == ".claude/commands/agent-rails-lite.md" ||
           line == ".claude/commands/agent-rails-check.md" ||
@@ -266,6 +283,7 @@ append_local_ignore() {
     [[ -s "$local_ignore_path" ]] && printf '\n'
     printf '%s\n' "$marker"
     printf '.claude/AGENT_RAILS.md\n'
+    printf '.claude/.agent-rails-managed-skills\n'
     printf '.claude/commands/agent-rails-pack.md\n'
     printf '.claude/commands/agent-rails-lite.md\n'
     printf '.claude/commands/agent-rails-check.md\n'
@@ -321,24 +339,50 @@ is_tracked_prefix() {
   [[ -n "$(git -C "$project_abs" ls-files -- "$rel_path" 2>/dev/null | sed -n '1p')" ]]
 }
 
+write_managed_skills() {
+  if [[ "$install_mode" == "local" && "$force" -ne 1 ]] && is_tracked_file "$managed_skills_path"; then
+    printf 'Keeping tracked managed skill inventory in local mode: %s\n' "$managed_skills_path"
+    return 0
+  fi
+  agent_adapter_write_managed_skills "$claude_dir" "$dry_run"
+}
+
+agent_adapter_load_managed_skills
+legacy_adapter=0
+if [[ ! -f "$managed_skills_path" ]] && {
+  agent_adapter_is_generated_file "$guide_path" \
+    || grep -Fq '<!-- agent-rails:start -->' "$claude_local_md_path" 2>/dev/null \
+    || grep -Fq '<!-- agent-rails:start -->' "$claude_project_md_path" 2>/dev/null
+}; then
+  legacy_adapter=1
+fi
+
 install_skills() {
   local args=(--dest "$skills_dir")
   local selected_skills=()
-  local skill_dir skill_name
+  local selected_skill_count=0
+  local skill_dir skill_name target_dir
   [[ "$dry_run" -eq 1 ]] && args+=(--dry-run)
 
-  if [[ "$install_mode" == "local" && -d "$AGENT_RAILS_HOME/skills" ]]; then
+  if [[ -d "$AGENT_RAILS_HOME/skills" ]]; then
     while IFS= read -r skill_dir; do
       skill_name="$(basename "$skill_dir")"
-      if [[ "$force" -ne 1 ]] && is_tracked_prefix ".claude/skills/$skill_name"; then
+      target_dir="$skills_dir/$skill_name"
+      if [[ "$install_mode" == "local" && "$force" -ne 1 ]] \
+        && is_tracked_prefix ".claude/skills/$skill_name"; then
         printf 'Keeping tracked skill directory in local mode: %s\n' "$project_abs/.claude/skills/$skill_name"
+      elif [[ -e "$target_dir" && "$force" -ne 1 && "$legacy_adapter" -ne 1 ]] \
+        && ! agent_adapter_managed_skill_is_recorded "$skill_name"; then
+        printf 'Keeping unmanaged existing skill directory: %s\n' "$target_dir"
       else
         selected_skills+=("$skill_name")
+        selected_skill_count=$((selected_skill_count + 1))
+        agent_adapter_record_managed_skill "$skill_name"
       fi
     done < <(find "$AGENT_RAILS_HOME/skills" -mindepth 1 -maxdepth 1 -type d | sort)
 
-    if [[ "${#selected_skills[@]}" -eq 0 ]]; then
-      printf 'No untracked Agent Rails skills to install.\n'
+    if [[ "$selected_skill_count" -eq 0 ]]; then
+      printf 'No Agent Rails skills to install.\n'
       return 0
     fi
     args+=("${selected_skills[@]}")
@@ -487,140 +531,11 @@ write_session_hook_settings() {
   python3 "$session_hook_settings_script" "${args[@]}"
 }
 
-guide_content="$(cat <<EOF
-# Agent Rails
-
-This project is configured to use Agent Rails for context orchestration.
-
-Agent Rails Version: $AGENT_RAILS_VERSION
-
-Before work, choose the smallest useful Agent Rails path:
-
-- Deep pack: 2+ subprojects, API/contracts/schema/data-model changes, ADR/handbook work, migrations/refactors, or ambiguous product decisions.
-- Lite pack: POCs, quick prototypes, version/Dockerfile/OSS/deploy prep, codegen freshness checks, or continuation from an existing handbook.
-- Check only: read-only deploy/release/upload workflows that consume the current branch.
-- Skip: pure status queries, simple command output, or fixed operations with no repo change and no branch-consumption risk.
-
-Visible session marker protocol:
-
-- Pack or lite: tell the user the AGENT RAILS: ON marker printed by the pack command before continuing.
-- Check only: tell the user AGENT RAILS: CHECK-ONLY (reason=<reason>) before continuing.
-- Skip: tell the user AGENT RAILS: SKIPPED (reason=<reason>) before continuing.
-
-Generate and read a Task Pack when the matrix says pack:
-
-\`\`\`bash
-project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$profile_path" "<goal>"
-\`\`\`
-
-For lite POC/deploy-prep work:
-
-\`\`\`bash
-project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$profile_path" --pack-mode lite "<goal>"
-\`\`\`
-
-Task Pack path is worktree-specific. Read the path printed by the pack command, not a stale pack from another worktree.
-
-Follow the Task Pack sections in order:
-
-1. Agent Rails Contract
-2. Relevant Entry Docs
-3. Memory Cards
-4. Grill Gate
-5. Verification Suggestions
-6. Subagent Result Contract
-7. Delivery Checklist
-
-Use the Grill Gate before architecture, refactor, migration, API contract, data model, or ambiguous product work. Ask one decision question at a time, provide your recommended answer, and inspect repo evidence before asking the user. Keep full grills to the Task Pack question budget; move remaining non-blocking choices into deferred decisions. In lite mode, skip full grill and ask only blockers.
-
-When delegating to a subagent, require the subagent to return the Subagent Result Contract from the Task Pack.
-
-Use \`project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; $AGENT_RAILS_BIN check --project "\$project_root" --profile "$profile_path" --print-only\` before final delivery, and as Step 0 for deploy/release/upload workflows that consume this branch.
-
-After delivery, use \`agent-memory-curator\` to decide whether this task produced reusable memory. If not, record a skip reason:
-
-\`\`\`bash
-project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN memory suggest --project "\$project_root" --profile "$profile_path" --decision skip --reason "<why no durable memory>"
-\`\`\`
-
-If the lesson is durable, write one small local card:
-
-\`\`\`bash
-project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN memory suggest --project "\$project_root" --profile "$profile_path" --decision keep --write-local --title "<short title>" --trigger "<trigger>" --applies-to "<scope>" --verify "<check>" --caution "<scope limits>" "<brief reusable lesson>"
-\`\`\`
-
-Do not write OpenMemory from this kit. Online memory is a read provider unless a separate integration is explicitly added.
-EOF
-)"
-
-pack_command_content="$(cat <<EOF
----
-description: Generate and read the Agent Rails Task Pack before engineering work; use --pack-mode lite for POCs and deploy prep
-argument-hint: [goal]
----
-
-Run this command:
-
-\`\`\`bash
-project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$profile_path" "\$ARGUMENTS"
-\`\`\`
-
-Then read the Task Pack path printed by the command. Do not reuse a pack generated for another worktree.
-
-Before continuing, tell the user the AGENT RAILS: ON (...) marker printed by the command.
-
-Follow its Agent Rails Contract, Grill Gate, Memory Cards, Verification Suggestions, Subagent Result Contract, and Delivery Checklist before making changes.
-EOF
-)"
-
-lite_command_content="$(cat <<EOF
----
-description: Generate and read a lite Agent Rails Task Pack for POCs, deploy prep, codegen checks, and quick continuation work
-argument-hint: [goal]
----
-
-Run this command:
-
-\`\`\`bash
-project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$profile_path" --pack-mode lite "\$ARGUMENTS"
-\`\`\`
-
-Then read the Task Pack path printed by the command. Do not reuse a pack generated for another worktree.
-
-Before continuing, tell the user the AGENT RAILS: ON (...) marker printed by the command.
-
-Use lite mode for POCs, quick prototypes, version/Dockerfile/OSS/deploy prep, codegen freshness checks, or continuation from an existing handbook. Skip full grill; keep only blocker questions, assumptions, deferred decisions, Memory Cards, Verification Suggestions, and Delivery Checklist.
-EOF
-)"
-
-check_command_content="$(cat <<EOF
----
-description: Print Agent Rails verification suggestions for the current project
-argument-hint: [optional check args]
----
-
-Run this command:
-
-\`\`\`bash
-project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN check --project "\$project_root" --profile "$profile_path" --print-only \$ARGUMENTS
-\`\`\`
-
-Before continuing, tell the user:
-
-\`\`\`text
-AGENT RAILS: CHECK-ONLY (reason=verification)
-\`\`\`
-
-Use the output to decide which verification commands to run before final delivery.
-EOF
-)"
+agent_adapter_content_init claude "$AGENT_RAILS_VERSION" "$AGENT_RAILS_BIN" "$profile_path"
+guide_content="$(agent_adapter_content_render guide)"
+pack_command_content="$(agent_adapter_content_render pack)"
+lite_command_content="$(agent_adapter_content_render lite)"
+check_command_content="$(agent_adapter_content_render check)"
 
 claude_block="$(cat <<EOF
 <!-- agent-rails:start -->
@@ -700,6 +615,7 @@ if [[ "$install_mode" == "local" && -n "$tracked_files" ]]; then
 fi
 
 install_skills
+write_managed_skills
 write_file "$guide_path" "$guide_content"
 write_file "$pack_command_path" "$pack_command_content"
 write_file "$lite_command_path" "$lite_command_content"

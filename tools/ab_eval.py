@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from agent_trajectory import TrajectoryError, configure_trajectory_parser
+
 
 SCHEMA_VERSION = 1
 
@@ -152,6 +154,20 @@ def find_total_tokens(value: Any) -> Optional[float]:
     nested = value.get("usage")
     if isinstance(nested, dict):
         return find_total_tokens(nested)
+    input_tokens = value.get("input_tokens")
+    output_tokens = value.get("output_tokens")
+    if all(
+        isinstance(candidate, (int, float)) and not isinstance(candidate, bool) and candidate >= 0
+        for candidate in (input_tokens, output_tokens)
+    ):
+        return input_tokens + output_tokens
+    prompt_tokens = value.get("prompt_tokens")
+    completion_tokens = value.get("completion_tokens")
+    if all(
+        isinstance(candidate, (int, float)) and not isinstance(candidate, bool) and candidate >= 0
+        for candidate in (prompt_tokens, completion_tokens)
+    ):
+        return prompt_tokens + completion_tokens
     return None
 
 
@@ -506,6 +522,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    configure_trajectory_parser(subparsers)
+
     capture_parser = subparsers.add_parser("capture", help="capture one completed TUI run")
     capture_parser.add_argument("--label", required=True, help="reveal-time name, for example off or agent-rails")
     capture_parser.add_argument("--treatment", required=True, help="treatment contract used for this TUI run")
@@ -546,7 +564,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         return args.handler(args)
-    except EvalError as error:
+    except (EvalError, TrajectoryError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 

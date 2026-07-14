@@ -34,6 +34,13 @@ class AbEvalTest(unittest.TestCase):
             check=False,
         )
 
+    def assert_atif_package_accepts(self, value):
+        try:
+            from atif import Trajectory
+        except ImportError:
+            return
+        Trajectory.model_validate(value)
+
     def write_candidate(self, path, label, treatment, final_response, total_tokens, omitted=None):
         value = {
             "schema_version": 1,
@@ -120,6 +127,192 @@ class AbEvalTest(unittest.TestCase):
         self.assertIn("+after", candidate["patch"])
         self.assertEqual(candidate["usage"]["usage"]["total_tokens"], 321)
         self.assertEqual(stat.S_IMODE(candidate_path.stat().st_mode), 0o600)
+
+    def test_codex_jsonl_converts_to_run_ir_otlp_and_atif(self):
+        events = self.root / "codex-events.jsonl"
+        task = self.root / "task.md"
+        output_dir = self.root / "codex-trajectory"
+        task.write_text("Fix the failing behavior.\n", encoding="utf-8")
+        event_values = [
+            {"type": "thread.started", "thread_id": "thread-codex-1"},
+            {"type": "turn.started"},
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "item-command-1",
+                    "type": "command_execution",
+                    "command": "pytest -q",
+                    "aggregated_output": "1 passed",
+                    "exit_code": 0,
+                    "status": "completed",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {"id": "item-message-1", "type": "agent_message", "text": "Implemented and verified."},
+            },
+            {
+                "type": "turn.completed",
+                "usage": {
+                    "input_tokens": 120,
+                    "cached_input_tokens": 20,
+                    "output_tokens": 30,
+                    "reasoning_output_tokens": 10,
+                },
+            },
+        ]
+        events.write_text("\n".join(json.dumps(value) for value in event_values) + "\n", encoding="utf-8")
+
+        process = self.run_tool(
+            "trajectory",
+            "--source",
+            "codex-jsonl",
+            "--input",
+            str(events),
+            "--task",
+            str(task),
+            "--agent-version",
+            "0.135.0",
+            "--model",
+            "gpt-test",
+            "--provider",
+            "openai",
+            "--output-dir",
+            str(output_dir),
+        )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        run_ir = json.loads((output_dir / "run-ir.json").read_text(encoding="utf-8"))
+        atif = json.loads((output_dir / "trajectory.atif.json").read_text(encoding="utf-8"))
+        otlp = json.loads((output_dir / "trace.otlp.json").read_text(encoding="utf-8"))
+        metrics = json.loads((output_dir / "trajectory-metrics.json").read_text(encoding="utf-8"))
+        manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(run_ir["schema_version"], "agent-eval-run/v1")
+        self.assertEqual(run_ir["fidelity"]["llm_boundaries"], "turn-level-usage-only")
+        self.assertEqual(atif["schema_version"], "ATIF-v1.7")
+        self.assertEqual(atif["steps"][0]["source"], "user")
+        self.assertEqual(atif["steps"][1]["tool_calls"][0]["function_name"], "shell")
+        self.assertEqual(atif["final_metrics"]["total_prompt_tokens"], 120)
+        self.assertEqual(atif["final_metrics"]["total_completion_tokens"], 30)
+        self.assert_atif_package_accepts(atif)
+        spans = otlp["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        self.assertTrue(any(span["name"] == "execute_tool shell" for span in spans))
+        self.assertEqual(metrics["tool_calls"], 1)
+        self.assertEqual(metrics["total_tokens"], 150)
+        self.assertNotIn("duration_ms", metrics)
+        self.assertEqual(manifest["timing_fidelity"], "synthetic-order-only")
+        self.assertEqual(manifest["files"]["metrics"], "trajectory-metrics.json")
+        self.assertEqual(stat.S_IMODE((output_dir / "raw" / "codex-events.jsonl").stat().st_mode), 0o600)
+        self.assertIn("unsanitized", process.stdout)
+
+    def test_opencode_export_preserves_message_tool_and_token_structure(self):
+        session = self.root / "opencode-session.json"
+        output_dir = self.root / "opencode-trajectory"
+        export = {
+            "info": {
+                "id": "ses-opencode-1",
+                "title": "[redacted:session-title:ses-opencode-1]",
+                "version": "1.17.16",
+                "time": {"created": 1_750_000_000_000, "updated": 1_750_000_001_000},
+            },
+            "messages": [
+                {
+                    "info": {
+                        "id": "msg-user-1",
+                        "sessionID": "ses-opencode-1",
+                        "role": "user",
+                        "time": {"created": 1_750_000_000_000},
+                    },
+                    "parts": [{"id": "part-user", "type": "text", "text": "[redacted:text:part-user]"}],
+                },
+                {
+                    "info": {
+                        "id": "msg-assistant-1",
+                        "sessionID": "ses-opencode-1",
+                        "role": "assistant",
+                        "time": {"created": 1_750_000_000_100, "completed": 1_750_000_000_900},
+                        "modelID": "model-test",
+                        "providerID": "provider-test",
+                        "cost": 0.01,
+                        "tokens": {
+                            "total": 175,
+                            "input": 100,
+                            "output": 20,
+                            "reasoning": 5,
+                            "cache": {"read": 30, "write": 2},
+                        },
+                        "finish": "stop",
+                    },
+                    "parts": [
+                        {
+                            "id": "part-tool",
+                            "type": "tool",
+                            "callID": "call-1",
+                            "tool": "read",
+                            "state": {
+                                "status": "completed",
+                                "input": {"redacted": "tool-input:part-tool"},
+                                "output": "[redacted:tool-output:part-tool]",
+                                "title": "[redacted:tool-title:part-tool]",
+                                "time": {"start": 1_750_000_000_200, "end": 1_750_000_000_400},
+                            },
+                        },
+                        {"id": "part-text", "type": "text", "text": "[redacted:text:part-text]"},
+                    ],
+                },
+            ],
+        }
+        session.write_text(json.dumps(export), encoding="utf-8")
+
+        process = self.run_tool(
+            "trajectory",
+            "--source",
+            "opencode-export",
+            "--input",
+            str(session),
+            "--agent-version",
+            "1.17.16",
+            "--input-sanitized",
+            "--output-dir",
+            str(output_dir),
+        )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        atif = json.loads((output_dir / "trajectory.atif.json").read_text(encoding="utf-8"))
+        metrics = json.loads((output_dir / "trajectory-metrics.json").read_text(encoding="utf-8"))
+        manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+        agent_step = next(step for step in atif["steps"] if step["source"] == "agent")
+        self.assertEqual(atif["agent"]["model_name"], "model-test")
+        self.assertEqual(agent_step["tool_calls"][0]["function_name"], "read")
+        self.assertEqual(agent_step["metrics"]["prompt_tokens"], 132)
+        self.assertEqual(agent_step["metrics"]["completion_tokens"], 25)
+        self.assertEqual(agent_step["metrics"]["cached_tokens"], 30)
+        self.assertEqual(atif["final_metrics"]["total_cost_usd"], 0.01)
+        self.assertEqual(metrics["tool_calls"], 1)
+        self.assertEqual(metrics["tool_errors"], 0)
+        self.assertEqual(metrics["total_tokens"], 157)
+        self.assertEqual(metrics["duration_ms"], 900)
+        self.assert_atif_package_accepts(atif)
+        self.assertEqual(manifest["timing_fidelity"], "observed")
+        self.assertTrue(manifest["input_sanitized"])
+        self.assertNotIn("unsanitized", process.stdout)
+
+    def test_codex_trajectory_requires_task_and_model(self):
+        events = self.root / "codex-events.jsonl"
+        events.write_text('{"type":"thread.started","thread_id":"thread-1"}\n', encoding="utf-8")
+        process = self.run_tool(
+            "trajectory",
+            "--source",
+            "codex-jsonl",
+            "--input",
+            str(events),
+            "--agent-version",
+            "0.135.0",
+            "--output-dir",
+            str(self.root / "missing-metadata"),
+        )
+        self.assertEqual(process.returncode, 2)
+        self.assertIn("--task is required", process.stderr)
 
     def test_mirrored_blind_judge_hides_harness_metadata(self):
         candidate_a = self.root / "off-candidate.json"

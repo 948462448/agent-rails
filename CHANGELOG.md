@@ -16,6 +16,7 @@
 - Reduced the bilingual README path to setup, run, and verify, moving customization and troubleshooting details into bilingual CLI reference documents.
 - Made plain `agent-rails init` project-neutral so first-time shell setup no longer pins one repository or prints the advanced workflow; explicit `--project` and `--profile` remain compatible.
 - Removed the built-in `agent-rails eval` logger and `agent-eval` skill so the product CLI stays focused on Agent Rails runtime capabilities; TUI A/B experiments now use a standalone, dependency-free Python capture and blind-judge tool.
+- Added optional Codex JSONL and OpenCode session trajectory conversion to the standalone evaluator, preserving raw input while emitting a versioned Run IR, deterministic trajectory metrics, OTel GenAI-compatible OTLP JSON, and ATIF-v1.7.
 - Stopped Agent Check from adding deleted shell entrypoints to generated `bash -n` verification commands.
 - Added `agent-rails opencode install`, `agent-rails opencode doctor`, and `agent-rails opencode uninstall` for a project-local opencode adapter backed by `.opencode/` instructions, commands, and skills.
 - Scoped SessionStart profiles to their source repository, with explicit worktree and sibling-repository guidance.

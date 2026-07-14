@@ -14,7 +14,8 @@ Agent Rails is a personal, repository-independent kit. It reads a target project
 - **Task Pack**: A generated, task-scoped context artifact consumed by an agent run.
 - **Pack Mode**: The evidence-density policy for a Task Pack. Lite, Normal, and Deep bound repeated excerpts while preserving capability sections; Audit keeps the Profile's configured maxima.
 - **Verification Plan**: The de-duplicated commands selected from changed paths. A full check report owns Git scope; integrations may consume only the Verification Plan.
-- **Sensitive Output Guard**: The shared Module that detects and redacts supported secret-bearing assignments, headers, and private-key blocks before an Adapter renders them.
+- **Git Scope**: The resolved target commit, optional base commit, merge base, and committed/worktree path snapshot used by Task Pack, Agent Check, and publish checks.
+- **Sensitive Output Guard**: The shared Module that detects supported secret-bearing assignments, headers, and private-key blocks, then applies the evidence policy required by each Adapter.
 - **Test Suite**: A domain-grouped set of regression tests loaded by the test runner. Suites share assertions and temporary-workspace setup but own their test cases and execution labels.
 
 ## Architectural boundaries
@@ -22,11 +23,12 @@ Agent Rails is a personal, repository-independent kit. It reads a target project
 - Adapter entrypoints own tool-specific CLI behavior, paths, ignore blocks, and tracked-file policy.
 - The shared Adapter Lifecycle module owns Generated File recognition and Managed Skill Inventory mechanics.
 - The shared Adapter Content module owns Generated Adapter Content rendering and tool-specific frontmatter; Adapter entrypoints only select the tool and write the rendered artifacts.
-- The Task Pack generator owns Pack Mode density caps and must retain the goal, Git state, prioritized changes, entry docs, memory, contract, grill, verification, delegation, and delivery seams in every mode; truncation must preserve complete lines and valid UTF-8.
+- The Task Pack generator owns Pack Mode density caps and must retain the goal, Git state, prioritized changes, entry docs, memory, contract, grill, verification, delegation, and delivery seams in every mode; truncation must preserve complete lines and valid UTF-8. Output is staged beside its destination and atomically replaced only after rendering succeeds.
 - Changed File Excerpts are diff-first for tracked paths and prefix-based only for untracked text, so the evidence seam favors changed behavior over file headers.
 - Smart sorting may use a bounded set of meaningful goal tokens against paths and actual changes; project-name and workflow-generic tokens do not earn priority.
-- The Sensitive Output Guard owns one detection Implementation for Task Pack and publish Adapters and fails closed when excerpt redaction cannot complete.
+- The Sensitive Output Guard owns one detection Implementation for Task Pack and publish Adapters. Its redaction Interface stays conservative and fails closed; its scan Interface suppresses recognizable code expressions and can map added diff lines back to source paths and line numbers. Publish scanning composes committed, staged, and unstaged diffs with full untracked-file scans, retaining literal secret and private-key evidence without promoting unchanged tracked content.
 - The Agent Check module exposes a full-report Interface and a narrow Verification Plan Interface; Task Pack and publish integrations consume the narrow Interface instead of parsing or duplicating scope.
+- The shared Git Scope Module owns default-base policy, commit-ref validation, merge-base resolution, and committed/worktree path snapshots. Task Pack, Agent Check, and publish checks are Adapters at this Seam.
 - The SessionStart hook carries only stable routing and safety guardrails; task-specific evidence and the full execution contract belong in the on-demand Task Pack.
 - The test runner owns suite selection and global test setup; each Test Suite owns one coherent workflow area.
 - Shared modules must preserve the public CLI, existing adapter paths, and on-disk compatibility unless a migration is explicitly designed.

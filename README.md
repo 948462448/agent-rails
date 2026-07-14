@@ -21,6 +21,7 @@ scripts/agent-context-pack.sh   # 生成 Task Pack
 scripts/agent-run.sh            # 串起 pack/estimate/check/memory curator 的本地 wrapper
 scripts/agent-check.sh          # 根据 diff 选择验证命令
 scripts/agent-publish-check.sh  # 发布/推送前汇总 scope、secret scan 和验证建议
+scripts/agent-git-scope.sh      # pack/check/publish 共用 Git scope 解析与路径快照
 scripts/agent-eval.sh           # 初始化评测集、记录 JSONL、生成报告
 scripts/agent-estimate.sh       # 估算字符数和近似 token 数
 scripts/agent-doctor.sh         # 诊断项目接入状态
@@ -67,6 +68,7 @@ agent-rails pack \
 ```
 
 默认 Task Pack 输出到 `~/.agent-rails/agent-context/`，不会写入 kit 仓库或 target project。默认文件名包含当前 worktree 路径指纹，避免同一个 repo 的多个 worktree 互相读到旧 Task Pack。
+Task Pack 会先在目标目录生成权限为 `0600` 的临时文件，成功后再原子替换目标文件；目录、不可写路径或替换失败都会返回非零，且不会打印 `Wrote` 或修改原目标权限。
 
 想把默认闭环串起来，可以用：
 
@@ -95,7 +97,7 @@ agent-rails publish check \
   --project /path/to/project
 ```
 
-它会汇总当前分支相对 base 的文件范围、staged/unstaged/untracked 状态、潜在 secret 命中（输出会打码），并嵌入 `agent-rails check` 的验证建议。这个命令只读，不会 stage、commit 或 push。
+它会汇总当前分支相对 base 的文件范围、staged/unstaged/untracked 状态、潜在 secret 命中（输出会打码），并嵌入 `agent-rails check` 的验证建议。已跟踪文件只扫描 committed、staged、unstaged diff 的新增行，未跟踪文本扫描完整内容；未修改的历史内容和删除行不会进入 findings。这个命令只读，不会 stage、commit 或 push。
 
 部署检查里的 base 应是“当前已部署的源码 revision”，不一定是 upstream。若隐式 base 缺失或已经等于 target，命令会标记 `Deployment delta: UNRESOLVED`，避免把“已经 push”误判成“没有待部署差异”。这时显式传入部署基线：
 
@@ -141,7 +143,7 @@ agent-rails pack \
 
 预算按 profile 中的比例分区，默认是 git 状态 20%、memory 40%、验证建议 20%、固定契约/清单 20%。默认不限制总预算，但本地 memory card 会以内嵌摘要形式进入 Task Pack，默认每张最多 1600 字符。Task Pack 会为已跟踪文件摘取实际 diff hunk，只有未跟踪文本文件才读取文件前缀；默认最多选择 8 个文件、每个 4000 字符，让相同 token 优先覆盖真实改动。没有命中任务或变更路径的本地 memory card 不会被强行塞进 Task Pack。
 
-摘录在写入 Task Pack 前会经过 Sensitive Output Guard：shell/YAML/JSON 风格的敏感键值、Authorization 头和 PEM private-key block 会被替换成 `<redacted>`，placeholder 和 tokenizer 配置保持可读。这个 guard 与 `publish check` 共用同一套识别规则；Base64/URL 编码仍不视为脱敏，未带敏感键名的高熵内容也不应依赖自动识别。
+摘录在写入 Task Pack 前会经过 Sensitive Output Guard：shell/YAML/JSON 风格的敏感键值、Authorization 头和 PEM private-key block 会被替换成 `<redacted>`，placeholder 和 tokenizer 配置保持可读。Task Pack 脱敏与 `publish check` 扫描共用键名和格式识别；Task Pack 保持保守脱敏，发布扫描会过滤可确认的代码表达式，并把 diff 新增行映射回源文件行号。测试目录不会被跳过，但只有本次变化证据进入 findings。Base64/URL 编码仍不视为脱敏，未带敏感键名的高熵内容也不应依赖自动识别。
 
 变更文件默认按 `smart` 排序：路径目标词、实际变更内容、入口文档、Agent Rails 控制脚本、源码、测试和构建配置会共同计分，并在 Task Pack 的 `Changed File Priority` 中展示分数和理由。项目名以及 `agent/task/pack` 等泛词不会参与目标匹配；实际变更搜索最多取 6 个有效目标词、每个文件最多计 2 次，避免排序成本失控。
 
@@ -505,7 +507,7 @@ evals/
 bash /Users/songlei/workspace/agent-rails/tests/run.sh
 ```
 
-默认按历史顺序运行全部 70 个测试。开发时也可以只跑一个或多个 Test Suite：
+默认按历史顺序运行全部 72 个测试。开发时也可以只跑一个或多个 Test Suite：
 
 ```bash
 bash tests/run.sh adapters

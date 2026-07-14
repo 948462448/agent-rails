@@ -35,10 +35,10 @@ These checks are guidance rather than a basename equality gate. Linked worktrees
 - SessionStart and generated Task Packs now state the target-scope and sensitive-output rules explicitly.
 - Base64 and URL encoding are treated as representation changes, not redaction.
 - Operators should project only required fields from logs, DOM snapshots, job tables, and similar sources, and must not repeat an exposed secret in later output.
-- Task Pack files are created with mode `0600`, including an existing destination that is overwritten.
+- Task Pack files are rendered to a same-directory `0600` staging file and atomically replace the destination only after successful generation. Failed writes do not print success, retain a stale pack as fresh output, or chmod a non-file destination.
 - Task Pack excerpts and publish secret findings share a Sensitive Output Guard for supported shell/YAML/JSON assignments, Authorization headers, and PEM private-key blocks.
 
-Automatic sanitization is deliberately conservative: placeholders and tokenizer configuration remain readable, while supported secret-bearing values are replaced with `<redacted>`. Encoded envelopes and unnamed high-entropy material still require explicit operator care.
+Automatic Task Pack sanitization is deliberately conservative: placeholders and tokenizer configuration remain readable, while supported secret-bearing values are replaced with `<redacted>`. Publish scanning reuses the same detection grammar but excludes recognizable code expressions. For tracked files it scans only added committed, staged, and unstaged diff lines and maps findings back to source paths and line numbers; untracked text files are scanned in full. Tests remain in scope when their lines change, while unchanged fixtures and removed values do not become release findings. Encoded envelopes and unnamed high-entropy material still require explicit operator care.
 
 ### Publish Baseline Safety
 
@@ -51,6 +51,8 @@ agent-rails publish check --project <target> --base <currently-deployed-source-r
 This prevents a clean push comparison from being misreported as a verified deployment delta.
 An explicit base must resolve to a Git commit; invalid refs fail before any diff or readiness summary is produced. The same ref validation contract applies to `pack` and `check`.
 
+Default-base policy, commit-ref validation, merge-base resolution, and committed/worktree path snapshots live in the shared Git Scope Module. Task Pack and Agent Check use the project policy (`origin/main`, `origin/master`, `main`, `master`); publish checks additionally prefer the current upstream because their Interface describes push scope.
+
 ## Verification
 
 The implementation is covered by the repository test suite, including:
@@ -61,6 +63,7 @@ The implementation is covered by the repository test suite, including:
 - The shared Adapter Content Interface, with byte-for-byte compatibility checks for Claude and OpenCode generated guides and commands.
 - SessionStart target/profile and sensitive-output guidance.
 - Task Pack `0600` permissions and generated guidance sections.
+- Task Pack failure behavior for non-file output destinations and the shared Git Scope Module Interface, including target-only snapshots that exclude working-tree changes.
 - Resolved, unresolved, and invalid publish-baseline cases, plus invalid-base rejection in `pack` and `check`.
 
 Run the release checks with:

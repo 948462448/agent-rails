@@ -96,13 +96,23 @@ test_publish_check_summarizes_scope_and_redacts_secrets() {
   local output
   mkdir -p "$repo/scripts"
   git -C "$repo" init -q
+  git -C "$repo" branch -M main
   printf '# temp\n' > "$repo/README.md"
-  printf '#!/usr/bin/env bash\nprintf "ok\\n"\n' > "$repo/scripts/run.sh"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'LEGACY_TOKEN=unit-test-historical-secret-123456\n'
+    printf 'printf "ok\\n"\n'
+  } > "$repo/scripts/run.sh"
   git -C "$repo" add README.md scripts/run.sh
   git_commit "$repo" init
 
-  printf '\nprintf "changed\\n"\n' >> "$repo/scripts/run.sh"
+  git -C "$repo" switch -q -c feature
+  printf 'COMMITTED_COOKIE=unit-test-committed-secret-123456\n' >> "$repo/scripts/run.sh"
   git -C "$repo" add scripts/run.sh
+  git_commit "$repo" committed-secret-fixture
+  printf 'DEPLOY_PASSWORD=unit-test-staged-secret-123456\n' >> "$repo/scripts/run.sh"
+  git -C "$repo" add scripts/run.sh
+  printf 'API_TOKEN=unit-test-unstaged-secret-123456\n' >> "$repo/scripts/run.sh"
   printf 'OPENMEMORY_ACCESS_KEY=super-secret-value\n' > "$repo/.env.local"
   {
     printf 'AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base\n'
@@ -114,11 +124,20 @@ test_publish_check_summarizes_scope_and_redacts_secrets() {
   assert_contains "$output" "AGENT RAILS: CHECK-ONLY (reason=publish"
   assert_contains "$output" "Agent publish check"
   assert_contains "$output" "Staged files (1)"
+  assert_contains "$output" "Unstaged files (1)"
   assert_contains "$output" "Untracked files (2)"
   assert_contains "$output" "scripts/run.sh"
   assert_contains "$output" ".env.local"
   assert_contains "$output" "Potential secret matches found"
+  assert_contains "$output" "COMMITTED_COOKIE=<redacted>"
+  assert_contains "$output" "DEPLOY_PASSWORD=<redacted>"
+  assert_contains "$output" "API_TOKEN=<redacted>"
   assert_contains "$output" "OPENMEMORY_ACCESS_KEY=<redacted>"
+  assert_not_contains "$output" "LEGACY_TOKEN=<redacted>"
+  assert_not_contains "$output" "unit-test-historical-secret"
+  assert_not_contains "$output" "unit-test-committed-secret"
+  assert_not_contains "$output" "unit-test-staged-secret"
+  assert_not_contains "$output" "unit-test-unstaged-secret"
   assert_not_contains "$output" "super-secret-value"
   assert_not_contains "$output" "TIKTOKEN_ENCODING=<redacted>"
   assert_not_contains "$output" "OPENMEMORY_TOKEN_ENV=<redacted>"
@@ -131,6 +150,8 @@ test_sensitive_output_module_redacts_supported_formats() {
   local findings="$TMP_ROOT/sensitive-output-findings.txt"
   local diff_input="$TMP_ROOT/sensitive-output-diff.txt"
   local diff_redacted="$TMP_ROOT/sensitive-output-diff-redacted.txt"
+  local scan_diff_input="$TMP_ROOT/sensitive-output-scan-diff.txt"
+  local scan_diff_findings="$TMP_ROOT/sensitive-output-scan-diff-findings.txt"
 
   cat > "$input" <<'SENSITIVE'
 OPENMEMORY_ACCESS_KEY=unit-test-secret-shell-123456
@@ -138,6 +159,13 @@ authorization: Bearer unit-test-secret-header-123456
 "api_key": "unit-test-secret-json-123456",
 OPENMEMORY_TOKEN_ENV="${OPENMEMORY_TOKEN_ENV:-OPENMEMORY_ACCESS_KEY}"
 AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base
+AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="$(normalize_positive_int "$AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE" 2)"
+token = substr(content, 1, 1)
+token=raw_tokens[i]
+secret_findings_file="$tmp_dir/secret-findings"
+api_token=build_token(config)
+password=options.password
+cookie="${!COOKIE_ENV-}"
 -----BEGIN PRIVATE KEY-----
 unit-test-private-key-material-123456
 -----END PRIVATE KEY-----
@@ -153,6 +181,13 @@ SENSITIVE
   assert_file_contains "$redacted" '"api_key": "<redacted>",'
   assert_file_contains "$redacted" 'OPENMEMORY_TOKEN_ENV="${OPENMEMORY_TOKEN_ENV:-OPENMEMORY_ACCESS_KEY}"'
   assert_file_contains "$redacted" 'AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base'
+  assert_file_contains "$redacted" 'AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="<redacted>"'
+  assert_file_contains "$redacted" 'token = <redacted>'
+  assert_file_contains "$redacted" 'token=<redacted>'
+  assert_file_contains "$redacted" 'secret_findings_file="<redacted>"'
+  assert_file_contains "$redacted" 'api_token=<redacted>'
+  assert_file_contains "$redacted" 'password=<redacted>'
+  assert_file_contains "$redacted" 'cookie="<redacted>"'
   assert_file_contains "$redacted" '<redacted private key block>'
   assert_file_not_contains "$redacted" 'unit-test-secret'
   assert_file_not_contains "$redacted" 'unit-test-private-key-material'
@@ -162,6 +197,13 @@ SENSITIVE
   assert_file_contains "$findings" '"api_key": "<redacted>",'
   assert_file_not_contains "$findings" 'TOKEN_ENV'
   assert_file_not_contains "$findings" 'TIKTOKEN_ENCODING'
+  assert_file_not_contains "$findings" 'CHARS_PER_TOKEN_ESTIMATE'
+  assert_file_not_contains "$findings" 'token ='
+  assert_file_not_contains "$findings" 'token='
+  assert_file_not_contains "$findings" 'secret_findings_file='
+  assert_file_not_contains "$findings" 'api_token='
+  assert_file_not_contains "$findings" 'password='
+  assert_file_not_contains "$findings" 'cookie='
   assert_file_not_contains "$findings" 'unit-test-secret'
 
   cat > "$diff_input" <<'SENSITIVE_DIFF'
@@ -173,6 +215,24 @@ SENSITIVE_DIFF
   agent_sensitive_redact_file "$diff_input" "$diff_redacted" diff
   assert_file_contains "$diff_redacted" '<redacted private key block>'
   assert_file_not_contains "$diff_redacted" 'private-key-material'
+
+  cat > "$scan_diff_input" <<'SENSITIVE_SCAN_DIFF'
+diff --git a/config/runtime.env b/config/runtime.env
+--- config/runtime.env
++++ config/runtime.env
+@@ -10,1 +10,4 @@
+-LEGACY_TOKEN=unit-test-removed-secret-123456
++API_TOKEN=unit-test-added-secret-123456
++-----BEGIN PRIVATE KEY-----
++unit-test-added-private-key-material-123456
++-----END PRIVATE KEY-----
+SENSITIVE_SCAN_DIFF
+  agent_sensitive_scan_file "$scan_diff_input" diff > "$scan_diff_findings"
+  assert_file_contains "$scan_diff_findings" 'config/runtime.env:10: API_TOKEN=<redacted>'
+  assert_file_contains "$scan_diff_findings" 'config/runtime.env:11: <redacted private key block>'
+  assert_file_not_contains "$scan_diff_findings" 'LEGACY_TOKEN'
+  assert_file_not_contains "$scan_diff_findings" 'unit-test-added-secret'
+  assert_file_not_contains "$scan_diff_findings" 'unit-test-added-private-key-material'
 }
 
 test_publish_check_requires_deployed_baseline_when_upstream_equals_target() {
@@ -229,6 +289,56 @@ test_git_commands_reject_invalid_base_ref() {
 
   if output="$("$AGENT_RAILS_BIN" pack --project "$repo" --base refs/heads/does-not-exist --budget 1000 invalid-base 2>&1)"; then
     printf 'Expected pack to reject an invalid base ref.\n' >&2
+    exit 1
+  fi
+  assert_contains "$output" "Base ref not found: refs/heads/does-not-exist"
+}
+
+test_git_scope_module_contract() {
+  local repo="$TMP_ROOT/git-scope-module"
+  local snapshot_dir="$TMP_ROOT/git-scope-snapshot"
+  local target_snapshot_dir="$TMP_ROOT/git-scope-target-snapshot"
+  local output
+  mkdir -p "$repo" "$snapshot_dir" "$target_snapshot_dir"
+  git -C "$repo" init -q
+  git -C "$repo" branch -M main
+  printf '# base\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" base
+  git -C "$repo" switch -q -c feature
+  printf '#!/usr/bin/env bash\n' > "$repo/feature.sh"
+  git -C "$repo" add feature.sh
+  git_commit "$repo" feature
+  printf '\nchanged\n' >> "$repo/README.md"
+  printf 'untracked\n' > "$repo/notes.txt"
+
+  # shellcheck source=scripts/agent-git-scope.sh
+  source "$ROOT_DIR/scripts/agent-git-scope.sh" || return 1
+  (
+    cd "$repo"
+    agent_git_scope_resolve HEAD "" project
+    [[ "$AGENT_GIT_SCOPE_BASE_REF" == "main" ]]
+    [[ "$AGENT_GIT_SCOPE_TARGET_SHA" == "$(git rev-parse HEAD)" ]]
+    [[ "$AGENT_GIT_SCOPE_MERGE_BASE" == "$(git merge-base HEAD main)" ]]
+    agent_git_scope_write_snapshot "$snapshot_dir" 1
+    agent_git_scope_write_snapshot "$target_snapshot_dir" 0
+  )
+
+  assert_file_contains "$snapshot_dir/committed-paths" "feature.sh"
+  assert_file_contains "$snapshot_dir/worktree-paths" "README.md"
+  assert_file_contains "$snapshot_dir/worktree-paths" "notes.txt"
+  assert_file_contains "$snapshot_dir/changed-paths" "feature.sh"
+  assert_file_contains "$snapshot_dir/changed-paths" "notes.txt"
+  assert_file_contains "$target_snapshot_dir/changed-paths" "feature.sh"
+  assert_file_not_contains "$target_snapshot_dir/changed-paths" "README.md"
+  assert_file_not_contains "$target_snapshot_dir/changed-paths" "notes.txt"
+  [[ ! -s "$target_snapshot_dir/status" ]] || {
+    printf 'Expected target-only Git scope snapshot to omit working tree status.\n' >&2
+    exit 1
+  }
+
+  if output="$(cd "$repo" && agent_git_scope_resolve HEAD refs/heads/does-not-exist project 2>&1)"; then
+    printf 'Expected Git Scope Module to reject an invalid base ref.\n' >&2
     exit 1
   fi
   assert_contains "$output" "Base ref not found: refs/heads/does-not-exist"
@@ -492,6 +602,7 @@ run_workflow_tests() {
   run_test test_sensitive_output_module_redacts_supported_formats "sensitive output module redacts supported formats"
   run_test test_publish_check_requires_deployed_baseline_when_upstream_equals_target "publish check requires deployed baseline when upstream equals target"
   run_test test_git_commands_reject_invalid_base_ref "git commands reject invalid base ref"
+  run_test test_git_scope_module_contract "shared Git Scope module contract"
   run_test test_estimate_uses_model_preset "estimate uses model preset"
   run_test test_estimate_uses_custom_tokenizer_command "estimate uses custom tokenizer command"
   run_test test_estimate_uses_deepseek_preset "estimate uses deepseek preset"

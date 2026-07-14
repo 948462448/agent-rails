@@ -25,7 +25,7 @@ usage() {
   cat <<'USAGE'
 Usage: bash tests/run.sh [core|adapters|workflows|context ...]
 
-With no suite names, runs all 70 tests in their historical order.
+With no suite names, runs all 72 tests in their historical order.
 USAGE
 }
 

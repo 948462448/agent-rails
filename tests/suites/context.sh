@@ -342,6 +342,36 @@ test_pack_rejects_missing_non_kit_profile() {
   assert_file_not_exists "$output_path"
 }
 
+test_pack_fails_closed_when_output_cannot_be_replaced() {
+  local repo="$TMP_ROOT/pack-output-failure"
+  local output_dir="$TMP_ROOT/pack-output-destination"
+  local output command_succeeded=0 mode_before mode_after
+  mkdir -p "$repo" "$output_dir"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  mode_before="$(stat -f '%Lp' "$output_dir" 2>/dev/null || stat -c '%a' "$output_dir")"
+
+  if output="$("$AGENT_RAILS_BIN" pack --project "$repo" --output "$output_dir" "output failure" 2>&1)"; then
+    command_succeeded=1
+  fi
+  mode_after="$(stat -f '%Lp' "$output_dir" 2>/dev/null || stat -c '%a' "$output_dir")"
+
+  # Older implementations chmodded the destination directory before reporting
+  # success. Restore cleanup access before asserting the failure contract.
+  chmod 700 "$output_dir"
+  if [[ "$command_succeeded" -eq 1 ]]; then
+    printf 'Expected Task Pack generation to fail for a directory output path.\n%s\n' "$output" >&2
+    exit 1
+  fi
+  assert_not_contains "$output" "Wrote $output_dir"
+  if [[ "$mode_after" != "$mode_before" ]]; then
+    printf 'Expected failed Task Pack generation to preserve destination mode %s; got %s.\n' "$mode_before" "$mode_after" >&2
+    exit 1
+  fi
+}
+
 test_pack_uses_model_preset_budget() {
   local repo="$TMP_ROOT/model-preset"
   local output="$TMP_ROOT/model-preset-task-pack.md"
@@ -578,6 +608,7 @@ run_context_tests() {
   run_test test_pack_sorts_changed_files_by_goal "pack sorts changed files by goal"
   run_test test_pack_falls_back_from_missing_legacy_kit_profile "pack falls back from missing legacy kit profile"
   run_test test_pack_rejects_missing_non_kit_profile "pack rejects missing non-kit profile"
+  run_test test_pack_fails_closed_when_output_cannot_be_replaced "pack fails closed when output cannot be replaced"
   run_test test_pack_uses_model_preset_budget "pack uses model preset budget"
   run_test test_pack_uses_lite_model_preset_budget "pack uses lite model preset budget"
   run_test test_pack_uses_deepseek_model_preset_budget "pack uses deepseek model preset budget"

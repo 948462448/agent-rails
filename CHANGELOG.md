@@ -15,6 +15,10 @@
 - Reduced recurring context cost with mode-specific Task Pack evidence caps, compact default contracts, and a smaller SessionStart payload while preserving all capability sections and profile overrides.
 - Made changed-file evidence diff-first and added `check --suggestions-only`, improving changed-line coverage while removing repeated Git scope from Task Pack integrations.
 - Added a shared Sensitive Output Guard for Task Pack and publish integrations, bounded changed-content scoring for more relevant smart-sort excerpts, and UTF-8-safe line-boundary truncation.
+- Made Task Pack output fail closed through a same-directory staging file and atomic replacement, so failed writes no longer report success or mutate non-file destinations.
+- Extracted Git target/base validation, merge-base resolution, and committed/worktree path snapshots into a shared Git Scope module used by `pack`, `check`, and `publish check`.
+- Kept Task Pack redaction conservative while making publish secret scans ignore recognizable code expressions, reducing false positives without skipping test fixtures.
+- Scoped publish secret findings to added committed/staged/unstaged lines plus full untracked files, with source line mapping for diff evidence.
 
 ## 0.5.1 - 2026-06-26
 

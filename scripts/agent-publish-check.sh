@@ -16,6 +16,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-git-scope.sh
+source "$AGENT_RAILS_HOME/scripts/agent-git-scope.sh"
 # shellcheck source=scripts/agent-sensitive-output.sh
 source "$AGENT_RAILS_HOME/scripts/agent-sensitive-output.sh"
 agent_rails_init_paths
@@ -79,74 +81,31 @@ source "$profile_path"
 
 TARGET_REF="$target_ref"
 BASE_REF="${base_ref:-${BASE_REF:-}}"
-
-resolve_default_base_ref() {
-  local ref
-  for ref in '@{upstream}' origin/main origin/master main master; do
-    if git rev-parse --verify --quiet "$ref" >/dev/null; then
-      printf '%s\n' "$ref"
-      return 0
-    fi
-  done
-}
-
-if ! git rev-parse --verify --quiet "$TARGET_REF^{commit}" >/dev/null; then
-  printf 'Target ref not found: %s\n' "$TARGET_REF" >&2
-  exit 2
-fi
-
-if [[ -z "$BASE_REF" ]]; then
-  BASE_REF="$(resolve_default_base_ref || true)"
-fi
-
-if [[ -n "$BASE_REF" ]] && ! git rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null; then
-  printf 'Base ref not found: %s\n' "$BASE_REF" >&2
-  exit 2
-fi
+agent_git_scope_resolve "$TARGET_REF" "$BASE_REF" publish || exit $?
+BASE_REF="$AGENT_GIT_SCOPE_BASE_REF"
+merge_base="$AGENT_GIT_SCOPE_MERGE_BASE"
 
 deployment_delta_unresolved=0
 if [[ "$base_ref_explicit" -eq 0 ]]; then
   if [[ -z "$BASE_REF" ]]; then
     deployment_delta_unresolved=1
-  elif [[ "$(git rev-parse "$BASE_REF")" == "$(git rev-parse "$TARGET_REF")" ]]; then
+  elif [[ "$AGENT_GIT_SCOPE_BASE_SHA" == "$AGENT_GIT_SCOPE_TARGET_SHA" ]]; then
     deployment_delta_unresolved=1
   fi
-fi
-
-if [[ -n "$BASE_REF" ]]; then
-  merge_base="$(git merge-base "$TARGET_REF" "$BASE_REF")"
-else
-  merge_base="$(git rev-parse "$TARGET_REF")"
 fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-status_file="$tmp_dir/status"
-status_paths_file="$tmp_dir/status-paths"
-committed_paths_file="$tmp_dir/committed-paths"
-changed_paths_file="$tmp_dir/changed-paths"
+git_scope_snapshot_dir="$tmp_dir/git-scope"
+agent_git_scope_write_snapshot "$git_scope_snapshot_dir" 1
+status_file="$git_scope_snapshot_dir/status"
+committed_paths_file="$git_scope_snapshot_dir/committed-paths"
+changed_paths_file="$git_scope_snapshot_dir/changed-paths"
 secret_findings_file="$tmp_dir/secret-findings"
+untracked_paths_file="$tmp_dir/untracked-paths"
+secret_scan_diff_file="$tmp_dir/secret-scan.diff"
 check_output_file="$tmp_dir/agent-check"
-
-git status --porcelain=v1 -uall > "$status_file"
-
-awk '
-  function path_from_status(line) {
-    path = substr(line, 4)
-    sub(/^.* -> /, "", path)
-    return path
-  }
-  NF { print path_from_status($0) }
-' "$status_file" | sort -u > "$status_paths_file"
-
-if [[ -n "$BASE_REF" ]]; then
-  git diff --name-only "$merge_base"..."$TARGET_REF" | sort -u > "$committed_paths_file"
-else
-  : > "$committed_paths_file"
-fi
-
-cat "$committed_paths_file" "$status_paths_file" | awk 'NF' | sort -u > "$changed_paths_file"
 
 count_lines() {
   local path="$1"
@@ -211,15 +170,42 @@ print_top_paths() {
   ' "$changed_paths_file" | sort -rn | head -n 8 | awk -F '\t' '{ printf "- %s (%s files)\n", $2, $1 }'
 }
 
-scan_changed_files_for_secrets() {
-  : > "$secret_findings_file"
+scan_git_diff_for_secrets() {
+  git diff --no-ext-diff --no-color --no-prefix --unified=0 "$@" > "$secret_scan_diff_file"
+  [[ -s "$secret_scan_diff_file" ]] || return 0
+  agent_sensitive_scan_file "$secret_scan_diff_file" diff >> "$secret_findings_file"
+}
+
+scan_full_paths_for_secrets() {
+  local paths_file="$1"
+  local rel_path
   while IFS= read -r rel_path; do
     [[ -n "$rel_path" && -f "$rel_path" ]] || continue
     if ! LC_ALL=C grep -Iq . "$rel_path" 2>/dev/null; then
       continue
     fi
     agent_sensitive_scan_file "$rel_path" >> "$secret_findings_file"
-  done < "$changed_paths_file"
+  done < "$paths_file"
+}
+
+scan_changed_files_for_secrets() {
+  : > "$secret_findings_file"
+  awk '
+    function path_from_status(line) {
+      path = substr(line, 4)
+      sub(/^.* -> /, "", path)
+      return path
+    }
+    NF && substr($0, 1, 2) == "??" { print path_from_status($0) }
+  ' "$status_file" | sort -u > "$untracked_paths_file"
+
+  if [[ -n "$BASE_REF" ]]; then
+    scan_git_diff_for_secrets "$merge_base...$TARGET_REF"
+  fi
+  scan_git_diff_for_secrets --cached
+  scan_git_diff_for_secrets
+  scan_full_paths_for_secrets "$untracked_paths_file"
+  LC_ALL=C sort -u -o "$secret_findings_file" "$secret_findings_file"
 }
 
 branch="$(git branch --show-current 2>/dev/null || true)"

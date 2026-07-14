@@ -11,6 +11,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-git-scope.sh
+source "$AGENT_RAILS_HOME/scripts/agent-git-scope.sh"
 agent_rails_init_paths
 
 profile_path_arg=""
@@ -90,33 +92,13 @@ fi
 TARGET_REF="$target_ref"
 BASE_REF="${base_ref:-${BASE_REF:-}}"
 
-resolve_default_base_ref() {
-  local ref
-  for ref in origin/main origin/master main master; do
-    if git rev-parse --verify --quiet "$ref" >/dev/null; then
-      printf '%s\n' "$ref"
-      return 0
-    fi
-  done
-}
-
 if [[ "$is_git_repo" -eq 1 ]]; then
-  if [[ -z "$BASE_REF" ]]; then
-    BASE_REF="$(resolve_default_base_ref)"
-  fi
-
-  if ! git rev-parse --verify --quiet "$TARGET_REF^{commit}" >/dev/null; then
-    printf 'Target ref not found: %s\n' "$TARGET_REF" >&2
-    exit 2
-  fi
-
-  if [[ -n "$BASE_REF" ]] && ! git rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null; then
-    printf 'Base ref not found: %s\n' "$BASE_REF" >&2
-    exit 2
-  fi
+  agent_git_scope_resolve "$TARGET_REF" "$BASE_REF" project || exit $?
+  BASE_REF="$AGENT_GIT_SCOPE_BASE_REF"
+  merge_base="$AGENT_GIT_SCOPE_MERGE_BASE"
 
   if [[ "$run_commands" -eq 1 && "$target_ref_explicit" -eq 1 ]]; then
-    target_sha="$(git rev-parse "$TARGET_REF")"
+    target_sha="$AGENT_GIT_SCOPE_TARGET_SHA"
     head_sha="$(git rev-parse HEAD)"
     if [[ "$target_sha" != "$head_sha" ]]; then
       printf 'Cannot --run checks for target ref %s while checkout is at HEAD %s. Use --print-only or check out the target first.\n' "$TARGET_REF" "${head_sha:0:12}" >&2
@@ -124,11 +106,6 @@ if [[ "$is_git_repo" -eq 1 ]]; then
     fi
   fi
 
-  if [[ -n "$BASE_REF" ]]; then
-    merge_base="$(git merge-base "$TARGET_REF" "$BASE_REF")"
-  else
-    merge_base="$(git rev-parse "$TARGET_REF")"
-  fi
 else
   if [[ "$target_ref_explicit" -eq 1 ]]; then
     printf 'Target ref requires a git repository: %s\n' "$TARGET_REF" >&2
@@ -142,14 +119,10 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 changed_file_list="$tmp_dir/changed-files"
 if [[ "$is_git_repo" -eq 1 ]]; then
-  {
-    git diff --name-only "$merge_base"..."$TARGET_REF" 2>/dev/null || true
-    if [[ "$target_ref_explicit" -eq 0 ]]; then
-      git diff --name-only 2>/dev/null || true
-      git diff --cached --name-only 2>/dev/null || true
-      git ls-files --others --exclude-standard 2>/dev/null || true
-    fi
-  } | awk 'NF' | sort -u > "$changed_file_list"
+  git_scope_snapshot_dir="$tmp_dir/git-scope"
+  include_worktree=$((1 - target_ref_explicit))
+  agent_git_scope_write_snapshot "$git_scope_snapshot_dir" "$include_worktree"
+  cp "$git_scope_snapshot_dir/changed-paths" "$changed_file_list"
 else
   : > "$changed_file_list"
 fi

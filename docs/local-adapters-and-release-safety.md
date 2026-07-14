@@ -65,6 +65,14 @@ An explicit base must resolve to a Git commit; invalid refs fail before any diff
 
 Default-base policy, commit-ref validation, merge-base resolution, and committed/worktree path snapshots live in the shared Git Scope Module. Task Pack and Agent Check use the project policy (`origin/main`, `origin/master`, `main`, `master`); publish checks additionally prefer the current upstream because their Interface describes push scope.
 
+### Release Distribution Safety
+
+GitHub Release distribution packages the complete multi-file kit, not only `bin/agent-rails`. The standalone installer verifies the published SHA-256 digest and archive layout before creating a version directory, then switches `current` and the user CLI through temporary symlinks. Existing non-symlink paths are treated as user-owned and cause a hard failure.
+
+Release installation does not change Target Project or Adapter ownership rules. `upgrade self` only changes the kit and keeps older version directories for rollback; the wider `update` command may subsequently refresh a target Adapter. Source checkouts remain supported through the original fast-forward pull path.
+
+The tag workflow validates that `v<VERSION>` points to a commit contained in `main`, reruns the full suite, builds the fixed-name assets, verifies their digest, and creates the Release through GitHub CLI. See [GitHub Release Distribution](./github-release-distribution.md) for the asset and rollback contract.
+
 ## Verification
 
 The implementation is covered by the repository test suite, including:
@@ -79,6 +87,7 @@ The implementation is covered by the repository test suite, including:
 - The shared Model Preset Interface, including alias normalization, Pack Mode budgets, `generic`, unknown models, and reset behavior between loads.
 - The shared Target Project Context Interface, including nested Git paths, Profile-aware names, explicit worktree slugs, missing Profiles, and default Task Pack paths.
 - Setup tool selection and dry-run orchestration, plus Verify execution, preview, and publish composition.
+- Release asset construction, checksum rejection, non-Git installation, stable CLI linkage, and project-neutral self-upgrade.
 - Resolved, unresolved, and invalid publish-baseline cases, plus invalid-base rejection in `pack` and `check`.
 
 Run the release checks with:

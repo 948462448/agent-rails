@@ -19,6 +19,8 @@ Agent Rails is a personal, repository-independent kit. It reads a target project
 - **Verification Plan**: The de-duplicated commands selected from changed paths. A full check report owns Git scope; integrations may consume only the Verification Plan.
 - **Git Scope**: The resolved target commit, optional base commit, merge base, and committed/worktree path snapshot used by Task Pack, Agent Check, and publish checks.
 - **Sensitive Output Guard**: The shared Module that detects supported secret-bearing assignments, headers, and private-key blocks, then applies the evidence policy required by each Adapter.
+- **Release Bundle**: The versioned, Git-metadata-free kit archive plus SHA-256 digest and standalone installer published as one GitHub Release.
+- **Release Install**: A versioned local kit directory selected through an atomic `current` symlink, with a stable user-level CLI entrypoint.
 - **User Journey Facade**: A small public command that composes existing Interfaces around one user goal without taking ownership of their domain rules. Setup, Run, and Verify form the default journey.
 - **Test Suite**: A domain-grouped set of regression tests loaded by the test runner. Suites share assertions and temporary-workspace setup but own their test cases and execution labels.
 
@@ -35,6 +37,10 @@ Agent Rails is a personal, repository-independent kit. It reads a target project
 - The shared Git Scope Module owns default-base policy, commit-ref validation, merge-base resolution, and committed/worktree path snapshots. Task Pack, Agent Check, and publish checks are Adapters at this Seam.
 - The shared Model Preset Module owns model alias normalization, known-model status, numeric limits, and Pack Mode budgets. Task Pack, Estimate, and Doctor are Adapters at this Seam and must not duplicate model tables.
 - The shared Target Project Context Module owns explicit-project canonicalization, Git-root discovery, Profile resolution/loading status, Profile-aware naming, worktree slug policy, and the derived Task Pack path. Command entrypoints retain their own user-facing failure and output policy.
+- The Release Builder owns the Git-tracked kit archive, fixed asset names, and SHA-256 manifest. The tag workflow must reject a tag that does not equal `v<VERSION>` before publishing assets.
+- The standalone Release Installer owns archive download, checksum and path validation, versioned directory creation, and atomic `current` / CLI symlink replacement. It must reject user-authored non-symlink paths instead of overwriting them.
+- The top-level CLI resolves its kit home from its own symlink-aware executable path so a stale shell-level `AGENT_RAILS_HOME` cannot redirect a Release install back to an old source checkout. Internal scripts still receive the resolved home through the exported environment.
+- Update preserves both installation models: Git checkouts use fast-forward pull, while Release Installs download verified assets. `upgrade self` never requires Target Project Context; `update` may additionally run tests, Doctor, and Adapter refresh.
 - Setup, Run, and Verify are User Journey Facades. Setup delegates adapter mutation and diagnosis to existing installers and Doctors; Verify delegates change selection and release scope to Agent Check and publish check. Facades must not duplicate Adapter Workspace, Git Scope, Sensitive Output Guard, or Verification Plan rules.
 - The SessionStart hook carries only stable routing and safety guardrails; task-specific evidence and the full execution contract belong in the on-demand Task Pack.
 - The test runner owns suite selection and global test setup; each Test Suite owns one coherent workflow area.

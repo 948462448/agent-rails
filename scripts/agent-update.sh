@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Update the Agent Rails kit and refresh a target project's local adapter.
+# Update the Agent Rails kit and optionally refresh a target project's adapter.
 
 set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
-       agent-rails upgrade self [same options]
+Usage: agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--version VERSION] [--repository OWNER/REPO] [--install-root PATH] [--bin-dir PATH] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
+       agent-rails upgrade self [--version VERSION] [--repository OWNER/REPO] [--install-root PATH] [--bin-dir PATH] [--skip-tests] [--dry-run]
 
-Runs a safe local update loop:
-  git pull --ff-only for the Agent Rails kit
-  bash tests/run.sh
-  doctor on the target project
-  refresh the target adapter and bundled skills
-  final doctor on the target project
+Update source depends on how the kit was installed:
+  Git checkout     git pull --ff-only
+  GitHub Release   verified release archive + atomic version switch
+
+`upgrade self` updates only the kit and does not require a target project.
+`update` also runs tests, Doctor, and the target adapter refresh unless skipped.
 USAGE
 }
 
@@ -26,15 +26,42 @@ source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
 source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
 agent_rails_init_paths
 
+original_args=("$@")
 project="$PWD"
 profile_path=""
 install_mode="local"
 session_hook=0
 global_reminder=0
+requested_version="latest"
+default_install_root="${XDG_DATA_HOME:-$HOME/.local/share}/agent-rails"
+if [[ -n "${AGENT_RAILS_INSTALL_ROOT:-}" ]]; then
+  install_root="$AGENT_RAILS_INSTALL_ROOT"
+elif [[ "$(basename "$AGENT_RAILS_HOME")" == "current" ]]; then
+  install_root="$(dirname "$AGENT_RAILS_HOME")"
+elif [[ "$(basename "$(dirname "$AGENT_RAILS_HOME")")" == "releases" ]]; then
+  install_root="$(dirname "$(dirname "$AGENT_RAILS_HOME")")"
+else
+  install_root="$default_install_root"
+fi
+if [[ -n "${AGENT_RAILS_RELEASE_REPOSITORY:-}" ]]; then
+  repository="$AGENT_RAILS_RELEASE_REPOSITORY"
+elif [[ -f "$install_root/release-repository" ]]; then
+  repository="$(awk 'NF { print $1; exit }' "$install_root/release-repository")"
+else
+  repository="948462448/agent-rails"
+fi
+if [[ -n "${AGENT_RAILS_BIN_DIR:-}" ]]; then
+  bin_dir="$AGENT_RAILS_BIN_DIR"
+elif [[ -f "$install_root/release-bin-dir" ]]; then
+  bin_dir="$(sed -n '1p' "$install_root/release-bin-dir")"
+else
+  bin_dir="$HOME/.local/bin"
+fi
 skip_pull=0
 skip_tests=0
 skip_doctor=0
 skip_adapter=0
+self_only=0
 dry_run=0
 
 while [[ $# -gt 0 ]]; do
@@ -65,6 +92,26 @@ while [[ $# -gt 0 ]]; do
       global_reminder=1
       shift
       ;;
+    --version)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      requested_version="${2#v}"
+      shift 2
+      ;;
+    --repository)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      repository="$2"
+      shift 2
+      ;;
+    --install-root)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      install_root="$2"
+      shift 2
+      ;;
+    --bin-dir)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      bin_dir="$2"
+      shift 2
+      ;;
     --skip-pull)
       skip_pull=1
       shift
@@ -81,6 +128,10 @@ while [[ $# -gt 0 ]]; do
       skip_adapter=1
       shift
       ;;
+    --self-only)
+      self_only=1
+      shift
+      ;;
     --dry-run)
       dry_run=1
       shift
@@ -95,6 +146,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$self_only" -eq 1 ]]; then
+  skip_doctor=1
+  skip_adapter=1
+fi
 
 print_command() {
   local first=1 arg
@@ -136,9 +192,13 @@ resolve_project() {
   fi
 }
 
+kit_is_git_checkout() {
+  git -C "$AGENT_RAILS_HOME" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 pull_command() {
   local branch upstream
-  if ! git -C "$AGENT_RAILS_HOME" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if ! kit_is_git_checkout; then
     printf 'Agent Rails home is not a git repository: %s\n' "$AGENT_RAILS_HOME" >&2
     exit 2
   fi
@@ -157,11 +217,15 @@ pull_command() {
   fi
 }
 
-run_pull() {
+run_git_update() {
   local branch upstream
   if [[ "$skip_pull" -eq 1 ]]; then
     printf '\nSkip git pull (--skip-pull).\n'
     return 0
+  fi
+  if [[ "$requested_version" != "latest" ]]; then
+    printf -- '--version is only supported by a GitHub Release installation.\n' >&2
+    exit 2
   fi
   if [[ "$dry_run" -eq 1 ]]; then
     printf '\nUpdate Agent Rails kit\n'
@@ -169,7 +233,7 @@ run_pull() {
     return 0
   fi
 
-  if ! git -C "$AGENT_RAILS_HOME" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if ! kit_is_git_checkout; then
     printf 'Agent Rails home is not a git repository: %s\n' "$AGENT_RAILS_HOME" >&2
     exit 2
   fi
@@ -186,15 +250,71 @@ run_pull() {
   fi
 }
 
-resolve_project
+run_release_update() {
+  local installer="$AGENT_RAILS_HOME/scripts/agent-release-install.sh"
+  local installer_args new_home old_physical new_physical
+  installer_args=(
+    --version "$requested_version"
+    --repository "$repository"
+    --install-root "$install_root"
+    --bin-dir "$bin_dir"
+  )
+
+  if [[ "$skip_pull" -eq 1 ]]; then
+    printf '\nSkip release download (--skip-pull).\n'
+    return 0
+  fi
+  if [[ ! -x "$installer" ]]; then
+    printf 'Release installer not found: %s\n' "$installer" >&2
+    exit 2
+  fi
+
+  old_physical="$(cd "$AGENT_RAILS_HOME" && pwd -P)"
+  printf '\nUpdate Agent Rails release\n'
+  if [[ "$dry_run" -eq 1 ]]; then
+    "$installer" "${installer_args[@]}" --dry-run
+    return 0
+  fi
+  "$installer" "${installer_args[@]}"
+
+  new_home="$install_root/current"
+  if [[ "${AGENT_RAILS_UPDATE_REEXEC:-0}" != "1" && -x "$new_home/bin/agent-rails" ]]; then
+    new_physical="$(cd "$new_home" && pwd -P)"
+    if [[ "$old_physical" != "$new_physical" ]]; then
+      printf 'Continue with Agent Rails %s\n' "$(awk 'NF { print $1; exit }' "$new_home/VERSION")"
+      exec env \
+        AGENT_RAILS_UPDATE_REEXEC=1 \
+        AGENT_RAILS_HOME="$new_home" \
+        "$new_home/bin/agent-rails" update "${original_args[@]}" --skip-pull
+    fi
+  fi
+}
+
+needs_project=1
+if [[ "$skip_doctor" -eq 1 && "$skip_adapter" -eq 1 ]]; then
+  needs_project=0
+else
+  resolve_project
+fi
 
 printf 'Agent Rails Update\n'
 printf 'Kit: %s\n' "$AGENT_RAILS_HOME"
-printf 'Project: %s\n' "$project_abs"
-printf 'Profile: %s\n' "$profile_path"
-printf 'Mode: %s\n' "$install_mode"
+if [[ "$self_only" -eq 1 ]]; then
+  printf 'Mode: self\n'
+else
+  printf 'Mode: project\n'
+fi
+if [[ "$needs_project" -eq 1 ]]; then
+  printf 'Project: %s\n' "$project_abs"
+  printf 'Profile: %s\n' "$profile_path"
+  printf 'Adapter mode: %s\n' "$install_mode"
+fi
 
-run_pull
+if kit_is_git_checkout; then
+  run_git_update
+else
+  run_release_update
+fi
 
 if [[ "$skip_tests" -eq 1 ]]; then
   printf '\nSkip tests (--skip-tests).\n'
@@ -203,13 +323,17 @@ else
 fi
 
 if [[ "$skip_doctor" -eq 1 ]]; then
-  printf '\nSkip pre-upgrade doctor (--skip-doctor).\n'
+  if [[ "$self_only" -ne 1 ]]; then
+    printf '\nSkip pre-upgrade doctor (--skip-doctor).\n'
+  fi
 else
   run_step "Run pre-upgrade doctor" "$AGENT_RAILS_BIN" doctor --project "$project_abs" --profile "$profile_path"
 fi
 
 if [[ "$skip_adapter" -eq 1 ]]; then
-  printf '\nSkip adapter upgrade (--skip-adapter).\n'
+  if [[ "$self_only" -ne 1 ]]; then
+    printf '\nSkip adapter upgrade (--skip-adapter).\n'
+  fi
 else
   upgrade_args=(--project "$project_abs" --profile "$profile_path" --mode "$install_mode")
   [[ "$session_hook" -eq 1 ]] && upgrade_args+=(--session-hook)
@@ -217,9 +341,7 @@ else
   run_step "Refresh target adapter and skills" "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" "${upgrade_args[@]}"
 fi
 
-if [[ "$skip_doctor" -eq 1 ]]; then
-  printf '\nSkip final doctor (--skip-doctor).\n'
-else
+if [[ "$skip_doctor" -eq 0 ]]; then
   run_step "Run final doctor" "$AGENT_RAILS_BIN" doctor --project "$project_abs" --profile "$profile_path"
 fi
 

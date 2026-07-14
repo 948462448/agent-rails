@@ -29,8 +29,11 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Added fallback for old adapters that still reference deleted kit-local profiles such as `profiles/open-eval.profile`.
 - Centralized profile resolution across command entrypoints and startup-hook output.
 
-## Unreleased - Local Adapters And Release Safety
+## 0.6.0 - Local Adapters, Release Distribution, And Safety
 
+- Added GitHub Release bundles with SHA-256 verification and versioned local installation directories.
+- Split self-upgrade from target-project refresh so Release users can update the CLI without a source checkout or project Profile.
+- Added tag-to-Release automation with a strict `v<VERSION>` gate and full pre-release tests.
 - Added a first-class, project-local OpenCode adapter with install, doctor, and uninstall lifecycle commands.
 - Made generated Claude adapter files safely refreshable while preserving user-authored content outside managed blocks.
 - Added repository/worktree profile-boundary guidance to SessionStart and Task Packs.

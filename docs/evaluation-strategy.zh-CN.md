@@ -340,9 +340,15 @@ Rails 实验组只有同时满足以下条件，才值得继续推进：
 
 ### M3：采集真实用量
 
-- 解析 provider 或 harness 的 usage 记录。
+- 保留 Codex/OpenCode 原始导出，并通过版本化 Run IR 生成 OTel GenAI-compatible
+  OTLP JSON 与 ATIF-v1.7；缺失字段保持未知，不从可见 turn 推测底层 LLM 调用。
+- 解析 provider 或 harness 的 usage 记录；记录来源的 token accounting 约定和
+  capture fidelity，避免把 cache/reasoning token 重复相加。
 - 将 Task Pack 估算值保留为独立字段。
-- 在运行清单中存储 token 明细、成本、耗时、模型轮数和工具调用数。
+- 生成独立的确定性轨迹指标文件，存储 token 明细、成本、可信耗时、人工追问、
+  工具调用、工具错误和重复调用；该文件不承担正确性评分。
+- patch、最终回答和确定性验收继续作为独立 outcome artifacts；ATIF 只承担轨迹
+  回放与过程评分，不能替代结果正确性判断。
 
 ### M4：配对报告
 

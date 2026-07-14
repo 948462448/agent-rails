@@ -23,6 +23,8 @@ USAGE
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
+# shellcheck source=scripts/agent-adapter-workspace.sh
+source "$AGENT_RAILS_HOME/scripts/agent-adapter-workspace.sh"
 
 project="$PWD"
 dry_run=0
@@ -72,6 +74,13 @@ guide_path="$claude_dir/AGENT_RAILS.md"
 pack_command_path="$commands_dir/agent-rails-pack.md"
 lite_command_path="$commands_dir/agent-rails-lite.md"
 check_command_path="$commands_dir/agent-rails-check.md"
+managed_skills_path="$claude_dir/.agent-rails-managed-skills"
+agent_adapter_workspace_init \
+  "$guide_path" \
+  "$pack_command_path" \
+  "$lite_command_path" \
+  "$check_command_path" \
+  "$managed_skills_path"
 claude_project_md_path="$project_abs/CLAUDE.md"
 claude_local_md_path="$project_abs/CLAUDE.local.md"
 claude_user_md_path="${AGENT_RAILS_CLAUDE_USER_MD:-$HOME/.claude/CLAUDE.md}"
@@ -79,33 +88,22 @@ claude_settings_path="${AGENT_RAILS_CLAUDE_SETTINGS:-$HOME/.claude/settings.json
 session_hook_path="$AGENT_RAILS_HOME/hooks/agent-rails-session-start.sh"
 session_hook_settings_script="$AGENT_RAILS_HOME/scripts/agent-claude-session-hook-settings.py"
 
-say_remove() {
-  if [[ "$dry_run" -eq 1 ]]; then
-    printf 'Would remove %s\n' "$1"
-  else
-    printf 'Removed %s\n' "$1"
-  fi
-}
-
-remove_path() {
-  local path="$1"
-  [[ -e "$path" ]] || return 0
-  if [[ "$dry_run" -eq 1 ]]; then
-    say_remove "$path"
-    return 0
-  fi
-  rm -rf "$path"
-  say_remove "$path"
-}
-
-remove_agent_rails_skills() {
-  local source_skills_dir="$AGENT_RAILS_HOME/skills"
-  local skill_dir
-  [[ -d "$source_skills_dir" && -d "$skills_dir" ]] || return 0
-  while IFS= read -r skill_dir; do
-    remove_path "$skills_dir/$(basename "$skill_dir")"
-  done < <(find "$source_skills_dir" -mindepth 1 -maxdepth 1 -type d | sort)
-}
+agent_adapter_workspace_load_managed_skills
+legacy_adapter=0
+if [[ ! -f "$managed_skills_path" ]] && {
+  agent_adapter_workspace_is_generated_file "$guide_path" \
+    || grep -Fq '<!-- agent-rails:start -->' "$claude_local_md_path" 2>/dev/null \
+    || grep -Fq '<!-- agent-rails:start -->' "$claude_project_md_path" 2>/dev/null
+}; then
+  legacy_adapter=1
+fi
+agent_adapter_workspace_configure \
+  "$project_abs" \
+  ".claude/skills" \
+  "$dry_run" \
+  0 \
+  0 \
+  "$legacy_adapter"
 
 remove_agent_rails_block() {
   local claude_md_path="$1"
@@ -208,56 +206,12 @@ local_ignore_paths() {
   printf '%s\n' "$project_abs/.gitignore"
 }
 
-remove_local_ignore_block() {
-  local path="$1"
-  [[ -f "$path" ]] || return 0
-  if ! grep -Fxq '# Agent Rails local adapter' "$path"; then
-    return 0
-  fi
-  if [[ "$dry_run" -eq 1 ]]; then
-    printf 'Would remove Agent Rails local ignore block from %s\n' "$path"
-    return 0
-  fi
-
-  local tmp_file
-  tmp_file="$(mktemp)"
-  awk '
-    function is_agent_rails_ignore_line(line) {
-      return line == ".claude/" ||
-        line == ".claude/AGENT_RAILS.md" ||
-        line == ".claude/commands/agent-rails-pack.md" ||
-        line == ".claude/commands/agent-rails-lite.md" ||
-          line == ".claude/commands/agent-rails-check.md" ||
-          line == ".claude/skills/agent-*/" ||
-          line == ".agent-rails/" ||
-          line == "CLAUDE.md" ||
-          line == "CLAUDE.local.md"
-    }
-    $0 == "# Agent Rails local adapter" {
-      in_agent_rails_ignore = 1
-      next
-    }
-    in_agent_rails_ignore && $0 == "# Agent Rails local adapter end" {
-      in_agent_rails_ignore = 0
-      next
-    }
-    in_agent_rails_ignore && is_agent_rails_ignore_line($0) {
-      next
-    }
-    in_agent_rails_ignore {
-      in_agent_rails_ignore = 0
-    }
-    { print }
-  ' "$path" > "$tmp_file"
-  mv "$tmp_file" "$path"
-  printf 'Removed Agent Rails local ignore block from %s\n' "$path"
-}
-
-remove_path "$guide_path"
-remove_path "$pack_command_path"
-remove_path "$lite_command_path"
-remove_path "$check_command_path"
-remove_agent_rails_skills
+agent_adapter_workspace_remove_generated_file "$guide_path"
+agent_adapter_workspace_remove_generated_file "$pack_command_path"
+agent_adapter_workspace_remove_generated_file "$lite_command_path"
+agent_adapter_workspace_remove_generated_file "$check_command_path"
+agent_adapter_workspace_remove_managed_skills
+agent_adapter_workspace_remove_managed_skills_file
 remove_agent_rails_block "$claude_local_md_path"
 remove_agent_rails_block "$claude_project_md_path"
 if [[ "$global_reminder" -eq 1 ]]; then
@@ -268,7 +222,23 @@ if [[ "$session_hook" -eq 1 ]]; then
 fi
 
 while IFS= read -r ignore_path; do
-  [[ -n "$ignore_path" ]] && remove_local_ignore_block "$ignore_path"
+  [[ -n "$ignore_path" ]] || continue
+  agent_adapter_workspace_remove_ignore_block \
+    "$ignore_path" \
+    "# Agent Rails local adapter" \
+    "# Agent Rails local adapter end" \
+    "Would remove Agent Rails local ignore block from" \
+    "Removed Agent Rails local ignore block from" \
+    ".claude/" \
+    ".claude/AGENT_RAILS.md" \
+    ".claude/.agent-rails-managed-skills" \
+    ".claude/commands/agent-rails-pack.md" \
+    ".claude/commands/agent-rails-lite.md" \
+    ".claude/commands/agent-rails-check.md" \
+    ".claude/skills/agent-*/" \
+    ".agent-rails/" \
+    "CLAUDE.md" \
+    "CLAUDE.local.md"
 done < <(local_ignore_paths | awk 'NF' | sort -u)
 
 if [[ "$dry_run" -ne 1 ]]; then

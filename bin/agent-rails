@@ -15,13 +15,17 @@ export AGENT_RAILS_VERSION
 usage() {
   cat <<'USAGE'
 Usage:
+  agent-rails setup [--project PATH] [--profile PATH] [--tool auto|claude|codex|opencode|all] [--no-session-hook] [--dry-run]
+  agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [goal text...]
+  agent-rails verify [--project PATH] [--profile PATH] [--print-only] [--publish] [--base REF] [--target-ref REF] [--no-secret-scan]
+
+Advanced:
   agent-rails --version
   agent-rails version
   agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
   agent-rails upgrade self [update args...]
   agent-rails init [--shell zsh|bash|fish] [--project PATH] [--profile PATH]
   agent-rails pack [--project PATH] [agent-context-pack args...]
-  agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [goal text...]
   agent-rails check [--project PATH] [agent-check args...]
   agent-rails publish check [--project PATH] [--profile PATH] [--base REF] [--target-ref REF] [--no-secret-scan]
   agent-rails estimate [--profile PATH] [--model NAME] [--tokenizer auto|char|tiktoken|command] [--file PATH] [text...]
@@ -33,38 +37,20 @@ Usage:
   agent-rails codex install [--project PATH] [--profile PATH] [--fix-project] [--dry-run]
   agent-rails codex doctor [--project PATH]
   agent-rails codex uninstall [--dry-run]
+  agent-rails opencode install [--project PATH] [--profile PATH] [--dry-run] [--force]
+  agent-rails opencode doctor [--project PATH]
+  agent-rails opencode uninstall [--project PATH] [--dry-run] [--force]
   agent-rails memory suggest [--project PATH] [--profile PATH] [--decision keep|skip|update|merge] [--write-local] [notes...]
   agent-rails skills install --dest PATH [--dry-run] [skill-name...]
   agent-rails home
 
 Examples:
-  agent-rails --version
-  agent-rails update --project /path/to/project --session-hook
-  agent-rails upgrade self --project /path/to/project --skip-pull
-  agent-rails init
-  agent-rails pack --project /path/to/project "review current changes"
-  agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "review current changes"
-  agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode lite "POC deploy prep"
-  agent-rails pack --project /path/to/project --model qwen3.7-max --pack-mode deep "review current changes"
-  agent-rails check --project /path/to/project --print-only
-  agent-rails publish check --project /path/to/project
-  agent-rails estimate --model glm5.1 --tokenizer char --file /path/to/task-pack.md
-  agent-rails eval init --dir evals
-  agent-rails eval record --task evals/tasks/sample.yaml --mode agentrails
-  agent-rails eval report --runs evals/runs
-  agent-rails doctor --project /path/to/project
-  agent-rails profile init --project /path/to/project
-  agent-rails profile init --project /path/to/project --scope project
-  agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local
-  agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --global-reminder
-  agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --session-hook
-  agent-rails claude uninstall --project /path/to/project --dry-run
-  agent-rails codex install --project /path/to/project --fix-project
-  agent-rails codex doctor --project /path/to/project
-  agent-rails codex uninstall --dry-run
-  agent-rails memory suggest --project /path/to/project --decision skip --reason "one-off output"
-  agent-rails memory suggest --project /path/to/project --write-local --title "Backend runs on Pandora Boot" "lesson to keep"
-  agent-rails skills install --dest /path/to/project/.claude/skills agent-context-pack agent-check
+  agent-rails setup --tool claude
+  agent-rails run "review current changes"
+  agent-rails verify
+  agent-rails verify --publish --base <deployed-revision>
+
+Run `agent-rails <command> --help` for advanced command details.
 USAGE
 }
 
@@ -109,6 +95,9 @@ run_in_project() {
 }
 
 case "$command" in
+  setup)
+    "$AGENT_RAILS_HOME/scripts/agent-setup.sh" "$@"
+    ;;
   update)
     "$AGENT_RAILS_HOME/scripts/agent-update.sh" "$@"
     ;;
@@ -136,6 +125,9 @@ case "$command" in
     ;;
   run)
     "$AGENT_RAILS_HOME/scripts/agent-run.sh" "$@"
+    ;;
+  verify)
+    "$AGENT_RAILS_HOME/scripts/agent-verify.sh" "$@"
     ;;
   check)
     run_in_project agent-check.sh "$@"
@@ -211,6 +203,9 @@ case "$command" in
     ;;
   codex)
     "$AGENT_RAILS_HOME/scripts/agent-codex.sh" "$@"
+    ;;
+  opencode)
+    "$AGENT_RAILS_HOME/scripts/agent-opencode.sh" "$@"
     ;;
   memory)
     subcommand="${1:-}"

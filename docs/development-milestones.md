@@ -29,8 +29,30 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Added fallback for old adapters that still reference deleted kit-local profiles such as `profiles/open-eval.profile`.
 - Centralized profile resolution across command entrypoints and startup-hook output.
 
+## Unreleased - Local Adapters And Release Safety
+
+- Added a first-class, project-local OpenCode adapter with install, doctor, and uninstall lifecycle commands.
+- Made generated Claude adapter files safely refreshable while preserving user-authored content outside managed blocks.
+- Added repository/worktree profile-boundary guidance to SessionStart and Task Packs.
+- Hardened Task Pack permissions to `0600` and documented sensitive-output handling.
+- Bounded Task Pack evidence density by mode and compacted SessionStart/default contracts to reduce recurring token cost without removing capability sections.
+- Switched tracked-file excerpts to actual diff hunks and deepened Agent Check with a narrow Verification Plan Interface for integrations.
+- Added a shared Sensitive Output Guard, bounded changed-content scoring, and UTF-8-safe truncation so denser Task Packs remain safer and more relevant.
+- Made Task Pack output transactional and extracted a shared Git Scope Module for consistent ref validation and changed-path snapshots across `pack`, `check`, and `publish check`.
+- Made publish checks require an explicit deployed-source baseline when the implicit deployment delta cannot be established.
+- Split Sensitive Output Guard evidence policy by Interface: conservative Task Pack redaction and higher-precision publish scanning over the same detection grammar.
+- Mapped publish diff findings back to source lines and excluded unchanged tracked content while retaining full scans for untracked files.
+- Extracted a shared Model Preset Module so `pack`, `estimate`, and `doctor` consume one model alias, limit, and Pack Mode budget contract.
+- Added a Target Project Context Module so command adapters share one project-root, Profile, worktree slug, and default Task Pack path contract.
+- Deepened the adapter lifecycle into a Managed Adapter Workspace Module so Claude and OpenCode share ownership, tracked-path, skill, write, and local-ignore mechanics while retaining tool-specific configuration behavior.
+- Added setup/run/verify as the default three-command user journey while retaining every lower-level command for compatibility and advanced use.
+- Reorganized the bilingual README and CLI reference around progressive disclosure instead of exposing implementation-oriented commands during onboarding.
+- Made the default shell bootstrap project-neutral and rewrote the bilingual README around installation, connection, normal conversation, visible activation, and common recovery paths.
+- Recorded the design, tradeoffs, verification, and follow-ups in [Local Adapters And Release Safety](./local-adapters-and-release-safety.md).
+
 ## Near-Term Backlog
 
 - Add a clearer repair command or doctor warning for stale adapter profile paths.
-- Investigate Task Pack overwrite warnings under `~/.agent-rails/agent-context`.
+- Extend the Sensitive Output Guard to encoded envelopes and carefully bounded high-entropy detection without increasing configuration false positives.
+- Add an optional publish receipt for artifact, configuration, and smoke-test evidence.
 - Keep release docs focused on personal install, upgrade, verify, and rollback flows.

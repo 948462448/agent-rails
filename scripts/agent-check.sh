@@ -4,13 +4,17 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s [--profile PATH] [--base REF] [--target-ref REF] [--run|--print-only]\n' "$0"
+  printf 'Usage: %s [--profile PATH] [--base REF] [--target-ref REF] [--run|--print-only|--suggestions-only]\n' "$0"
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
+# shellcheck source=scripts/agent-git-scope.sh
+source "$AGENT_RAILS_HOME/scripts/agent-git-scope.sh"
 agent_rails_init_paths
 
 profile_path_arg=""
@@ -19,6 +23,7 @@ base_ref=""
 target_ref="HEAD"
 target_ref_explicit=0
 run_commands=0
+suggestions_only=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +51,10 @@ while [[ $# -gt 0 ]]; do
       run_commands=0
       shift
       ;;
+    --suggestions-only)
+      suggestions_only=1
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -57,51 +66,28 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-  is_git_repo=1
-  repo_root="$(cd "$repo_root" && pwd)"
-  cd "$repo_root"
-else
-  is_git_repo=0
-  repo_root="$PWD"
-fi
-
-profile_path="$(agent_rails_resolve_profile "$repo_root" "$(basename "$repo_root")" "$profile_path_arg")"
-if [[ ! -f "$profile_path" ]]; then
-  printf 'Profile not found: %s\n' "$profile_path" >&2
+if [[ "$suggestions_only" -eq 1 && "$run_commands" -eq 1 ]]; then
+  printf '%s\n' '--suggestions-only cannot be combined with --run.' >&2
   exit 2
 fi
 
-if [[ -f "$profile_path" ]]; then
-  # shellcheck source=/dev/null
-  source "$profile_path"
-fi
+agent_target_project_resolve "$PWD" "$profile_path_arg" || exit $?
+agent_target_project_load_profile required || exit 2
+repo_root="$AGENT_TARGET_PROJECT_ROOT"
+profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
+is_git_repo="$AGENT_TARGET_PROJECT_IS_GIT_REPO"
+cd "$repo_root"
 
 TARGET_REF="$target_ref"
 BASE_REF="${base_ref:-${BASE_REF:-}}"
 
-resolve_default_base_ref() {
-  local ref
-  for ref in origin/main origin/master main master; do
-    if git rev-parse --verify --quiet "$ref" >/dev/null; then
-      printf '%s\n' "$ref"
-      return 0
-    fi
-  done
-}
-
 if [[ "$is_git_repo" -eq 1 ]]; then
-  if [[ -z "$BASE_REF" ]]; then
-    BASE_REF="$(resolve_default_base_ref)"
-  fi
-
-  if ! git rev-parse --verify --quiet "$TARGET_REF" >/dev/null; then
-    printf 'Target ref not found: %s\n' "$TARGET_REF" >&2
-    exit 2
-  fi
+  agent_git_scope_resolve "$TARGET_REF" "$BASE_REF" project || exit $?
+  BASE_REF="$AGENT_GIT_SCOPE_BASE_REF"
+  merge_base="$AGENT_GIT_SCOPE_MERGE_BASE"
 
   if [[ "$run_commands" -eq 1 && "$target_ref_explicit" -eq 1 ]]; then
-    target_sha="$(git rev-parse "$TARGET_REF")"
+    target_sha="$AGENT_GIT_SCOPE_TARGET_SHA"
     head_sha="$(git rev-parse HEAD)"
     if [[ "$target_sha" != "$head_sha" ]]; then
       printf 'Cannot --run checks for target ref %s while checkout is at HEAD %s. Use --print-only or check out the target first.\n' "$TARGET_REF" "${head_sha:0:12}" >&2
@@ -109,11 +95,6 @@ if [[ "$is_git_repo" -eq 1 ]]; then
     fi
   fi
 
-  if [[ -n "$BASE_REF" ]] && git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
-    merge_base="$(git merge-base "$TARGET_REF" "$BASE_REF")"
-  else
-    merge_base="$(git rev-parse "$TARGET_REF")"
-  fi
 else
   if [[ "$target_ref_explicit" -eq 1 ]]; then
     printf 'Target ref requires a git repository: %s\n' "$TARGET_REF" >&2
@@ -127,14 +108,10 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 changed_file_list="$tmp_dir/changed-files"
 if [[ "$is_git_repo" -eq 1 ]]; then
-  {
-    git diff --name-only "$merge_base"..."$TARGET_REF" 2>/dev/null || true
-    if [[ "$target_ref_explicit" -eq 0 ]]; then
-      git diff --name-only 2>/dev/null || true
-      git diff --cached --name-only 2>/dev/null || true
-      git ls-files --others --exclude-standard 2>/dev/null || true
-    fi
-  } | awk 'NF' | sort -u > "$changed_file_list"
+  git_scope_snapshot_dir="$tmp_dir/git-scope"
+  include_worktree=$((1 - target_ref_explicit))
+  agent_git_scope_write_snapshot "$git_scope_snapshot_dir" "$include_worktree"
+  cp "$git_scope_snapshot_dir/changed-paths" "$changed_file_list"
 else
   : > "$changed_file_list"
 fi
@@ -154,6 +131,15 @@ add_command() {
 has_changed() {
   local pattern="$1"
   grep -Eq "$pattern" "$changed_file_list"
+}
+
+verification_file_exists() {
+  local path="$1"
+  if [[ "$target_ref_explicit" -eq 1 ]]; then
+    git cat-file -e "$AGENT_GIT_SCOPE_TARGET_SHA:$path" 2>/dev/null
+  else
+    [[ -f "$path" ]]
+  fi
 }
 
 if has_changed '^contracts/'; then
@@ -199,12 +185,67 @@ elif has_changed '^dolphin/'; then
 fi
 
 if has_changed '^(bin/agent-rails|scripts/.*\.sh)$'; then
-  shell_files="$(grep -E '^(bin/agent-rails|scripts/.*\.sh)$' "$changed_file_list" | tr '\n' ' ')"
-  add_command "shell entrypoints changed" "${VERIFY_SHELL:-bash -n ${shell_files}}"
+  shell_files="$(
+    while IFS= read -r shell_file; do
+      if verification_file_exists "$shell_file"; then
+        printf '%q ' "$shell_file"
+      fi
+    done < <(grep -E '^(bin/agent-rails|scripts/.*\.sh)$' "$changed_file_list")
+  )"
+  if [[ -n "$shell_files" ]]; then
+    add_command "shell entrypoints changed" "${VERIFY_SHELL:-bash -n ${shell_files}}"
+  fi
+fi
+
+if has_changed '^tests/.*\.sh$'; then
+  test_command="${VERIFY_TESTS:-}"
+  if [[ -z "$test_command" ]]; then
+    unmapped_test_file="$(
+      awk '
+        /^tests\/.*\.sh$/ && $0 !~ /^tests\/suites\/(core|adapters|workflows|context)\.sh$/ {
+          print
+          exit
+        }
+      ' "$changed_file_list"
+    )"
+    if [[ -n "$unmapped_test_file" ]]; then
+      test_command="bash tests/run.sh"
+    else
+      changed_test_suites=()
+      changed_test_suite_count=0
+      for test_suite in core adapters workflows context; do
+        if grep -Fxq "tests/suites/$test_suite.sh" "$changed_file_list"; then
+          changed_test_suites+=("$test_suite")
+          changed_test_suite_count=$((changed_test_suite_count + 1))
+        fi
+      done
+      if [[ "$changed_test_suite_count" -gt 0 ]]; then
+        test_command="bash tests/run.sh ${changed_test_suites[*]}"
+      else
+        test_command="bash tests/run.sh"
+      fi
+    fi
+  fi
+  add_command "shell tests changed" "$test_command"
 fi
 
 if [[ -s "$changed_file_list" && ! -s "$commands_file" ]]; then
   add_command "project default" "${VERIFY_PROJECT:-}"
+fi
+
+print_suggested_verification() {
+  if [[ -s "$commands_file" ]]; then
+    while IFS=$'\t' read -r reason command; do
+      printf -- '- [%s] %s\n' "$reason" "$command"
+    done < "$commands_file"
+  else
+    printf -- '- No automated command selected. For docs-only changes, manually review rendered Markdown and links.\n'
+  fi
+}
+
+if [[ "$suggestions_only" -eq 1 ]]; then
+  print_suggested_verification
+  exit 0
 fi
 
 if [[ "${AGENT_RAILS_SUPPRESS_MARKER:-0}" != "1" ]]; then
@@ -228,13 +269,7 @@ else
 fi
 
 printf '\nSuggested verification:\n'
-if [[ -s "$commands_file" ]]; then
-  while IFS=$'\t' read -r reason command; do
-    printf -- '- [%s] %s\n' "$reason" "$command"
-  done < "$commands_file"
-else
-  printf -- '- No automated command selected. For docs-only changes, manually review rendered Markdown and links.\n'
-fi
+print_suggested_verification
 
 printf '\nNext action suggestions:\n'
 printf -- '- Fix: run the suggested command for any touched executable component before merge.\n'

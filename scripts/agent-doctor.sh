@@ -19,6 +19,10 @@ AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
+# shellcheck source=scripts/agent-model-presets.sh
+source "$AGENT_RAILS_HOME/scripts/agent-model-presets.sh"
 agent_rails_init_paths
 AGENT_RAILS_VERSION="$(agent_rails_version)"
 
@@ -156,24 +160,6 @@ read_adapter_version() {
   done | awk 'NF { print; exit }'
 }
 
-resolve_profile() {
-  local project_name="$1"
-  agent_rails_resolve_profile "$project_abs" "$project_name" "$profile_path"
-}
-
-known_model_preset() {
-  local model_key
-  model_key="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr ' _' '--')"
-  case "$model_key" in
-    generic|qwen3.7-max|qwen-3.7-max|qwen3.7max|glm5.1|glm-5.1|glm51|deepseek-v4-pro|deepseekv4pro|deepseek-v4pro|deepseek-v4|deepseek4-pro)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 provider_uses_openmemory() {
   case "${MEMORY_PROVIDER:-local}" in
     openmemory|hybrid) return 0 ;;
@@ -290,28 +276,18 @@ if [[ ! -d "$project" ]]; then
   exit 1
 fi
 
-project_abs="$(cd "$project" && pwd)"
-if git_root_for_project="$(git -C "$project_abs" rev-parse --show-toplevel 2>/dev/null)"; then
-  project_abs="$(cd "$git_root_for_project" && pwd)"
-fi
-project_name="$(basename "$project_abs")"
-PROJECT_ROOT="$project_abs"
-PROJECT_NAME="${PROJECT_NAME:-$project_name}"
-PROJECT_WORKTREE_SLUG_PRESET="${PROJECT_WORKTREE_SLUG:-}"
-PROJECT_WORKTREE_SLUG="${PROJECT_WORKTREE_SLUG:-$(agent_rails_project_worktree_slug "$project_abs" "$PROJECT_NAME")}"
+agent_target_project_resolve "$project" "$profile_path" || exit $?
+project_abs="$AGENT_TARGET_PROJECT_ROOT"
+profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
+is_git_repo="$AGENT_TARGET_PROJECT_IS_GIT_REPO"
 ok "Project: $project_abs"
 
-is_git_repo=0
-if command -v git >/dev/null 2>&1 && git -C "$project_abs" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  is_git_repo=1
-  git_root="$(git -C "$project_abs" rev-parse --show-toplevel)"
-  git_root="$(cd "$git_root" && pwd)"
-  ok "Git repository: $git_root"
+if [[ "$is_git_repo" -eq 1 ]]; then
+  ok "Git repository: $project_abs"
 else
   warn "No git repository detected; diff-based pack/check output will be limited."
 fi
 
-profile_path="$(resolve_profile "$project_name")"
 if [[ -f "$profile_path" ]]; then
   ok "Profile: $profile_path"
 else
@@ -319,8 +295,7 @@ else
 fi
 
 if [[ -f "$profile_path" ]]; then
-  # shellcheck source=/dev/null
-  if ! source "$profile_path"; then
+  if ! agent_target_project_load_profile; then
     fail "Profile could not be sourced: $profile_path"
   fi
 fi
@@ -340,13 +315,8 @@ else
   info "No Agent Rails env file configured."
 fi
 
-PROJECT_NAME="${PROJECT_NAME:-$project_name}"
-if [[ -n "$PROJECT_WORKTREE_SLUG_PRESET" ]]; then
-  PROJECT_WORKTREE_SLUG="$PROJECT_WORKTREE_SLUG_PRESET"
-else
-  PROJECT_WORKTREE_SLUG="$(agent_rails_project_worktree_slug "$project_abs" "$PROJECT_NAME")"
-fi
-TASK_PACK_PATH="${TASK_PACK_PATH:-$(agent_rails_default_task_pack_path "$PROJECT_WORKTREE_SLUG")}"
+agent_target_project_finalize
+TASK_PACK_PATH="$AGENT_TARGET_PROJECT_TASK_PACK_PATH"
 MEMORY_PROVIDER="${MEMORY_PROVIDER:-local}"
 AGENT_RAILS_MODEL="${AGENT_RAILS_MODEL:-generic}"
 AGENT_RAILS_PACK_MODE="${AGENT_RAILS_PACK_MODE:-normal}"
@@ -360,7 +330,7 @@ case "$AGENT_RAILS_PACK_MODE" in
     ;;
 esac
 
-if known_model_preset "$AGENT_RAILS_MODEL"; then
+if agent_model_preset_known "$AGENT_RAILS_MODEL"; then
   ok "Model preset: $AGENT_RAILS_MODEL"
 else
   warn "Unknown model preset: $AGENT_RAILS_MODEL"

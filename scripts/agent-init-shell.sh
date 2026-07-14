@@ -19,7 +19,7 @@ source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
 agent_rails_init_paths
 
 shell_name="$(basename "${SHELL:-zsh}")"
-project_path="${AGENT_RAILS_PROJECT:-$PWD}"
+project_path="${AGENT_RAILS_PROJECT:-}"
 profile_path="${AGENT_RAILS_PROFILE:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -50,7 +50,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$profile_path" ]]; then
+if [[ -z "$profile_path" && -n "$project_path" ]]; then
   project_name="$(basename "$project_path")"
   profile_path="$AGENT_RAILS_CONFIG_HOME/profiles/projects/${project_name}.profile"
 fi
@@ -83,24 +83,27 @@ esac
 
 printf 'Agent Rails Init\n\n'
 printf '1. Add this block to %s:\n\n' "$rc_file"
+printf '# Agent Rails\n'
 if [[ "$shell_name" == "fish" ]]; then
-  cat <<EOF
-# Agent Rails
-set -gx AGENT_RAILS_HOME "$AGENT_RAILS_HOME"
-$path_line
-$alias_line
-set -gx AGENT_RAILS_PROJECT "$project_path"
-set -gx AGENT_RAILS_PROFILE "$profile_path"
-EOF
+  printf 'set -gx AGENT_RAILS_HOME "%s"\n' "$AGENT_RAILS_HOME"
 else
-  cat <<EOF
-# Agent Rails
-export AGENT_RAILS_HOME="$AGENT_RAILS_HOME"
-$path_line
-$alias_line
-export AGENT_RAILS_PROJECT="$project_path"
-export AGENT_RAILS_PROFILE="$profile_path"
-EOF
+  printf 'export AGENT_RAILS_HOME="%s"\n' "$AGENT_RAILS_HOME"
+fi
+printf '%s\n' "$path_line"
+printf '%s\n' "$alias_line"
+if [[ -n "$project_path" ]]; then
+  if [[ "$shell_name" == "fish" ]]; then
+    printf 'set -gx AGENT_RAILS_PROJECT "%s"\n' "$project_path"
+  else
+    printf 'export AGENT_RAILS_PROJECT="%s"\n' "$project_path"
+  fi
+fi
+if [[ -n "$profile_path" ]]; then
+  if [[ "$shell_name" == "fish" ]]; then
+    printf 'set -gx AGENT_RAILS_PROFILE "%s"\n' "$profile_path"
+  else
+    printf 'export AGENT_RAILS_PROFILE="%s"\n' "$profile_path"
+  fi
 fi
 
 printf '\n2. Reload your shell:\n\n'
@@ -110,13 +113,18 @@ printf '\n3. Verify:\n\n'
 cat <<'EOF'
 agent-rails --help
 agent-rails home
-ar doctor --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE"
 EOF
 
-printf '\n4. Daily usage after init:\n\n'
+if [[ -n "$project_path" && -n "$profile_path" ]]; then
+  printf 'ar doctor --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE"\n'
+fi
+
+printf '\n4. Connect a project:\n\n'
 cat <<'EOF'
-ar run --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE" --model qwen3.7-max --pack-mode deep "本次任务目标"
-ar run --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE" --model qwen3.7-max --pack-mode lite "POC / deploy prep 目标"
-ar claude install --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE" --mode local
-ar check --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE" --print-only
+cd /path/to/project
+agent-rails setup --tool claude  # or codex / opencode
+
+# Restart the selected coding agent, then work normally.
+# Before delivery:
+agent-rails verify
 EOF

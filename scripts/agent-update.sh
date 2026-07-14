@@ -22,6 +22,8 @@ AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
 agent_rails_init_paths
 
 project="$PWD"
@@ -125,12 +127,9 @@ resolve_project() {
     exit 2
   fi
 
-  project_abs="$(cd "$project" && pwd)"
-  if git_root_for_project="$(git -C "$project_abs" rev-parse --show-toplevel 2>/dev/null)"; then
-    project_abs="$(cd "$git_root_for_project" && pwd)"
-  fi
-  project_name="$(basename "$project_abs")"
-  profile_path="$(agent_rails_resolve_profile "$project_abs" "$project_name" "$profile_path")"
+  agent_target_project_resolve "$project" "$profile_path" || exit $?
+  project_abs="$AGENT_TARGET_PROJECT_ROOT"
+  profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
   if [[ ! -f "$profile_path" ]]; then
     printf 'Profile not found: %s\n' "$profile_path" >&2
     exit 2
@@ -212,7 +211,7 @@ fi
 if [[ "$skip_adapter" -eq 1 ]]; then
   printf '\nSkip adapter upgrade (--skip-adapter).\n'
 else
-  upgrade_args=(--force --project "$project_abs" --profile "$profile_path" --mode "$install_mode")
+  upgrade_args=(--project "$project_abs" --profile "$profile_path" --mode "$install_mode")
   [[ "$session_hook" -eq 1 ]] && upgrade_args+=(--session-hook)
   [[ "$global_reminder" -eq 1 ]] && upgrade_args+=(--global-reminder)
   run_step "Refresh target adapter and skills" "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" "${upgrade_args[@]}"

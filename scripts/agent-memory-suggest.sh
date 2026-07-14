@@ -29,6 +29,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
 agent_rails_init_paths
 
 profile_path_arg=""
@@ -151,25 +153,11 @@ if [[ ! -d "$project" ]]; then
 fi
 
 project_abs="$(cd "$project" && pwd)"
-if repo_root="$(git -C "$project_abs" rev-parse --show-toplevel 2>/dev/null)"; then
-  is_git_repo=1
-else
-  is_git_repo=0
-  repo_root="$project_abs"
-fi
-
-profile_path="$(agent_rails_resolve_profile "$repo_root" "$(basename "$repo_root")" "$profile_path_arg")"
-if [[ ! -f "$profile_path" ]]; then
-  printf 'Profile not found: %s\n' "$profile_path" >&2
-  exit 2
-fi
-
-if [[ -f "$profile_path" ]]; then
-  # shellcheck source=/dev/null
-  source "$profile_path"
-fi
-
-PROJECT_NAME="${PROJECT_NAME:-$(basename "$repo_root")}"
+agent_target_project_resolve "$project_abs" "$profile_path_arg" || exit $?
+agent_target_project_load_profile required || exit 2
+repo_root="$AGENT_TARGET_PROJECT_ROOT"
+profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
+is_git_repo="$AGENT_TARGET_PROJECT_IS_GIT_REPO"
 MEMORY_LOCAL_DIR="${MEMORY_LOCAL_DIR:-$(agent_rails_default_memory_dir "$PROJECT_NAME")}"
 notes="${note_parts[*]-}"
 [[ -n "$title" ]] || title="Untitled memory decision"

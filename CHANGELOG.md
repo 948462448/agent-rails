@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- Added `agent-rails setup` and `agent-rails verify` as compatible user-journey facades over the existing adapter, Doctor, Agent Check, and publish-check commands.
+- Reduced the bilingual README path to setup, run, and verify, moving customization and troubleshooting details into bilingual CLI reference documents.
+- Made plain `agent-rails init` project-neutral so first-time shell setup no longer pins one repository or prints the advanced workflow; explicit `--project` and `--profile` remain compatible.
+- Added `agent-rails opencode install`, `agent-rails opencode doctor`, and `agent-rails opencode uninstall` for a project-local opencode adapter backed by `.opencode/` instructions, commands, and skills.
+- Scoped SessionStart profiles to their source repository, with explicit worktree and sibling-repository guidance.
+- Added sensitive-output rules to SessionStart and Task Packs, and restricted new Task Packs to owner-only file permissions.
+- Added an unresolved deployment-baseline warning when `publish check` would otherwise compare a target to an identical implicit upstream.
+- Rejected invalid base refs consistently in `pack`, `check`, and `publish check` instead of silently falling back to an empty diff.
+- Added generated-file ownership markers and exact Claude/OpenCode managed-skill inventories so refresh and uninstall preserve user-authored files and unrelated `agent-*` skills.
+- Deepened generated-file ownership and managed-skill inventory into a Managed Adapter Workspace Module that also centralizes tracked-path protection, managed writes, skill lifecycle, and local-ignore mechanics for Claude and OpenCode.
+- Extracted Claude/OpenCode guide and command rendering into a shared Adapter Content module with tool-specific guide implementations and shared command bodies.
+- Split the monolithic shell regression runner into selectable core, adapters, workflows, and context Test Suites while preserving the default test order and output.
+- Stopped the automatic `update` flow from forcing Claude adapter overwrites; explicit `doctor --fix` remains the repair path for damaged managed files.
+- Reduced recurring context cost with mode-specific Task Pack evidence caps, compact default contracts, and a smaller SessionStart payload while preserving all capability sections and profile overrides.
+- Made changed-file evidence diff-first and added `check --suggestions-only`, improving changed-line coverage while removing repeated Git scope from Task Pack integrations.
+- Added a shared Sensitive Output Guard for Task Pack and publish integrations, bounded changed-content scoring for more relevant smart-sort excerpts, and UTF-8-safe line-boundary truncation.
+- Made Task Pack output fail closed through a same-directory staging file and atomic replacement, so failed writes no longer report success or mutate non-file destinations.
+- Extracted Git target/base validation, merge-base resolution, and committed/worktree path snapshots into a shared Git Scope module used by `pack`, `check`, and `publish check`.
+- Kept Task Pack redaction conservative while making publish secret scans ignore recognizable code expressions, reducing false positives without skipping test fixtures.
+- Scoped publish secret findings to added committed/staged/unstaged lines plus full untracked files, with source line mapping for diff evidence.
+- Extracted model aliases, limits, and Pack Mode budgets into a shared Model Preset module used by `pack`, `estimate`, and `doctor`.
+- Extracted explicit-project identity, Profile loading, worktree slug, and default Task Pack path rules into a shared Target Project Context module used across command adapters.
+- Kept deleted shell paths in Agent Check scope reports while excluding them from executable `bash -n` verification commands, including explicit target-ref checks.
+
+## 0.5.1 - 2026-06-26
+
+- Fixed default Agent Rails config paths leaking from parent processes into child commands, which could make tests that override `HOME` still write under the parent's `AGENT_RAILS_CONFIG_HOME`.
+- Added regression coverage for parent `agent_rails_init_paths` calls followed by child `HOME=... agent-rails pack` invocations.
+
 ## 0.5.0 - 2026-06-26
 
 - Removed OpenEval-specific docs, profiles, local memory cards, shell variables, and test examples from the generic Agent Rails kit.

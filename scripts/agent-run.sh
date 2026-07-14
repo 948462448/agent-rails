@@ -17,6 +17,8 @@ AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
 agent_rails_init_paths
 
 project="$PWD"
@@ -86,21 +88,18 @@ if [[ ! -d "$project" ]]; then
   exit 2
 fi
 
-project_abs="$(cd "$project" && pwd)"
-if git_root="$(git -C "$project_abs" rev-parse --show-toplevel 2>/dev/null)"; then
-  project_abs="$(cd "$git_root" && pwd)"
-fi
-project_name="$(basename "$project_abs")"
+agent_target_project_resolve "$project" "$profile_path" || exit $?
+agent_target_project_load_profile required || exit 2
+project_abs="$AGENT_TARGET_PROJECT_ROOT"
+profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
 
-resolve_profile() {
-  agent_rails_resolve_profile "$project_abs" "$project_name" "$profile_path"
-}
-
-profile_path="$(resolve_profile)"
-if [[ ! -f "$profile_path" ]]; then
-  printf 'Profile not found: %s\n' "$profile_path" >&2
-  exit 2
+AGENT_RAILS_ENV_FILE="${AGENT_RAILS_ENV_FILE:-}"
+if [[ -n "$AGENT_RAILS_ENV_FILE" && -f "$AGENT_RAILS_ENV_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$AGENT_RAILS_ENV_FILE"
 fi
+agent_target_project_finalize
+task_pack_path="$AGENT_TARGET_PROJECT_TASK_PACK_PATH"
 
 goal="${goal_parts[*]:-TODO: describe the concrete user goal.}"
 
@@ -172,30 +171,6 @@ print_command() {
   printf '\n'
 }
 
-profile_task_pack_path() {
-  PROJECT_ROOT="$project_abs"
-  PROJECT_NAME="${PROJECT_NAME:-$project_name}"
-  PROJECT_WORKTREE_SLUG_PRESET="${PROJECT_WORKTREE_SLUG:-}"
-  PROJECT_WORKTREE_SLUG="${PROJECT_WORKTREE_SLUG:-$(agent_rails_project_worktree_slug "$project_abs" "$PROJECT_NAME")}"
-  # shellcheck source=/dev/null
-  source "$profile_path"
-  AGENT_RAILS_ENV_FILE="${AGENT_RAILS_ENV_FILE:-}"
-  if [[ -n "$AGENT_RAILS_ENV_FILE" && -f "$AGENT_RAILS_ENV_FILE" ]]; then
-    # shellcheck source=/dev/null
-    source "$AGENT_RAILS_ENV_FILE"
-  fi
-  PROJECT_NAME="${PROJECT_NAME:-$project_name}"
-  if [[ -n "$PROJECT_WORKTREE_SLUG_PRESET" ]]; then
-    PROJECT_WORKTREE_SLUG="$PROJECT_WORKTREE_SLUG_PRESET"
-  else
-    PROJECT_WORKTREE_SLUG="$(agent_rails_project_worktree_slug "$project_abs" "$PROJECT_NAME")"
-  fi
-  PROFILE_TASK_PACK_PATH="${TASK_PACK_PATH:-$(agent_rails_default_task_pack_path "$PROJECT_WORKTREE_SLUG")}"
-}
-
-PROFILE_TASK_PACK_PATH=""
-profile_task_pack_path
-task_pack_path="$PROFILE_TASK_PACK_PATH"
 effective_pack_mode="${pack_mode_arg:-${AGENT_RAILS_PACK_MODE:-normal}}"
 pack_command=("$AGENT_RAILS_BIN" pack "${pack_args[@]}" "$goal")
 estimate_command=("$AGENT_RAILS_BIN" estimate "${estimate_args[@]}" --file "$task_pack_path")

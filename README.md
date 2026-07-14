@@ -24,11 +24,14 @@ scripts/agent-publish-check.sh  # 发布/推送前汇总 scope、secret scan 和
 scripts/agent-git-scope.sh      # pack/check/publish 共用 Git scope 解析与路径快照
 scripts/agent-eval.sh           # 初始化评测集、记录 JSONL、生成报告
 scripts/agent-estimate.sh       # 估算字符数和近似 token 数
+scripts/agent-model-presets.sh  # pack/estimate/doctor 共用模型别名、规格和预算
+scripts/agent-target-project.sh # 统一 Target Project、Profile、worktree 与默认路径上下文
 scripts/agent-doctor.sh         # 诊断项目接入状态
 scripts/agent-init-profile.sh   # 生成本地 project profile
 scripts/agent-install-claude.sh # 安装 Claude Code adapter
 scripts/agent-uninstall-claude.sh # 卸载 Claude Code adapter
 scripts/agent-opencode.sh # 安装/检查/卸载 opencode adapter
+scripts/agent-adapter-workspace.sh # 统一 managed adapter 的写入、技能、tracked-path 与 local-ignore 生命周期
 scripts/agent-adapter-content.sh # 渲染 Claude/OpenCode guide 与 command 内容
 scripts/agent-sensitive-output.sh # Task Pack/publish 共用的敏感输出识别与脱敏
 hooks/agent-rails-session-start.sh # 可选 Claude Code SessionStart hook
@@ -164,6 +167,8 @@ agent-rails pack \
 | `qwen3.7-max` | 1M | 991K | 983K | 64K | 256K | - | - | 24K | 60K | 160K | 320K |
 | `glm5.1` | 202K | 202K | 166K | 128K | - | - | - | 12K | 24K | 60K | 100K |
 | `deepseek-v4-pro` | 1M | 1M | - | 384K | - | 15000 | 1200000 | 24K | 60K | 160K | 320K |
+
+模型 alias、规格和模式预算由共享 Model Preset Module 统一维护；`pack`、`estimate`、`doctor` 只通过其 Interface 读取，避免不同命令对同一模型产生漂移。
 
 `lite/normal/deep/audit` 是 Task Pack 推荐 token 预算。`lite` 面向 POC、快速原型、版本/Dockerfile/OSS/部署准备、codegen freshness check，保留 scope、memory、verification 和 checklist，但跳过完整 grill。脚本会用 `AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE` 把 token 预算转换成字符预算，默认 `2 chars/token`。需要手动覆盖时可以用 `--token-budget TOKENS` 或 `--budget CHARS`。
 
@@ -507,7 +512,7 @@ evals/
 bash /Users/songlei/workspace/agent-rails/tests/run.sh
 ```
 
-默认按历史顺序运行全部 72 个测试。开发时也可以只跑一个或多个 Test Suite：
+默认按历史顺序运行全部 75 个测试。开发时也可以只跑一个或多个 Test Suite：
 
 ```bash
 bash tests/run.sh adapters

@@ -20,6 +20,8 @@ AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
 agent_rails_init_paths
 AGENT_RAILS_VERSION="$(agent_rails_version)"
 
@@ -100,12 +102,9 @@ resolve_project() {
     printf 'Project directory not found: %s\n' "$project" >&2
     exit 2
   fi
-  project_abs="$(cd "$project" && pwd)"
-  if git_root_for_project="$(git -C "$project_abs" rev-parse --show-toplevel 2>/dev/null)"; then
-    project_abs="$(cd "$git_root_for_project" && pwd)"
-  fi
-  project_name="$(basename "$project_abs")"
-  profile_path="$(agent_rails_resolve_profile "$project_abs" "$project_name" "$profile_path")"
+  agent_target_project_resolve "$project" "$profile_path" || exit $?
+  project_abs="$AGENT_TARGET_PROJECT_ROOT"
+  profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
 }
 
 project_has_marker() {

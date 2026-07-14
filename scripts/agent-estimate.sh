@@ -19,6 +19,8 @@ USAGE
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
+# shellcheck source=scripts/agent-model-presets.sh
+source "$AGENT_RAILS_HOME/scripts/agent-model-presets.sh"
 
 profile_path="$AGENT_RAILS_HOME/profiles/default.profile"
 model_arg=""
@@ -90,52 +92,6 @@ normalize_positive_int() {
   else
     printf '%s\n' "$default_value"
   fi
-}
-
-load_model_preset() {
-  local model_key
-  model_key="$(printf '%s' "$AGENT_RAILS_MODEL" | tr '[:upper:]' '[:lower:]' | tr ' _' '--')"
-
-  AGENT_RAILS_MODEL_PRESET_FOUND=0
-  AGENT_RAILS_MODEL_CANONICAL="$AGENT_RAILS_MODEL"
-  AGENT_RAILS_MODEL_CONTEXT_TOKENS=""
-  AGENT_RAILS_MODEL_MAX_INPUT_TOKENS=""
-  AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS=""
-  AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS=""
-  AGENT_RAILS_MODEL_MAX_REASONING_TOKENS=""
-  AGENT_RAILS_MODEL_RPM=""
-  AGENT_RAILS_MODEL_TPM=""
-
-  case "$model_key" in
-    qwen3.7-max|qwen-3.7-max|qwen3.7max)
-      AGENT_RAILS_MODEL_PRESET_FOUND=1
-      AGENT_RAILS_MODEL_CANONICAL="qwen3.7-max"
-      AGENT_RAILS_MODEL_CONTEXT_TOKENS=1000000
-      AGENT_RAILS_MODEL_MAX_INPUT_TOKENS=991000
-      AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS=983000
-      AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS=64000
-      AGENT_RAILS_MODEL_MAX_REASONING_TOKENS=256000
-      ;;
-    deepseek-v4-pro|deepseekv4pro|deepseek-v4pro|deepseek-v4|deepseek4-pro)
-      AGENT_RAILS_MODEL_PRESET_FOUND=1
-      AGENT_RAILS_MODEL_CANONICAL="deepseek-v4-pro"
-      AGENT_RAILS_MODEL_CONTEXT_TOKENS=1000000
-      AGENT_RAILS_MODEL_MAX_INPUT_TOKENS=1000000
-      AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS=""
-      AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS=384000
-      AGENT_RAILS_MODEL_MAX_REASONING_TOKENS=""
-      AGENT_RAILS_MODEL_RPM=15000
-      AGENT_RAILS_MODEL_TPM=1200000
-      ;;
-    glm5.1|glm-5.1|glm51)
-      AGENT_RAILS_MODEL_PRESET_FOUND=1
-      AGENT_RAILS_MODEL_CANONICAL="glm5.1"
-      AGENT_RAILS_MODEL_CONTEXT_TOKENS=202000
-      AGENT_RAILS_MODEL_MAX_INPUT_TOKENS=202000
-      AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS=166000
-      AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS=128000
-      ;;
-  esac
 }
 
 percent_x100() {
@@ -255,7 +211,7 @@ count_tokens() {
 }
 
 AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="$(normalize_positive_int "$AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE" 2)"
-load_model_preset
+agent_model_preset_load "$AGENT_RAILS_MODEL"
 
 tmp_input=""
 cleanup() {

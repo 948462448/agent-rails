@@ -17,6 +17,46 @@ test_agent_check_includes_bin_entrypoint() {
   assert_contains "$output" "bash -n bin/agent-rails"
 }
 
+test_agent_check_excludes_deleted_shell_from_command() {
+  local repo="$TMP_ROOT/check-deleted-shell"
+  local base_sha output suggestions target_sha target_suggestions
+  mkdir -p "$repo/scripts"
+  git -C "$repo" init -q
+  printf '#!/usr/bin/env bash\nprintf "keep"\n' > "$repo/scripts/keep.sh"
+  printf '#!/usr/bin/env bash\nprintf "delete"\n' > "$repo/scripts/delete.sh"
+  git -C "$repo" add scripts/keep.sh scripts/delete.sh
+  git_commit "$repo" init
+  base_sha="$(git -C "$repo" rev-parse HEAD)"
+
+  printf '\nprintf "changed"\n' >> "$repo/scripts/keep.sh"
+  rm -f "$repo/scripts/delete.sh"
+
+  output="$("$AGENT_RAILS_BIN" check --project "$repo" --print-only)"
+  suggestions="$("$AGENT_RAILS_BIN" check --project "$repo" --suggestions-only)"
+
+  assert_contains "$output" "- scripts/delete.sh"
+  assert_contains "$suggestions" "bash -n scripts/keep.sh"
+  assert_not_contains "$suggestions" "scripts/delete.sh"
+
+  printf '#!/usr/bin/env bash\nprintf "target only"\n' > "$repo/scripts/target-only.sh"
+  git -C "$repo" add -A
+  git_commit "$repo" target
+  target_sha="$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" checkout -q "$base_sha"
+
+  target_suggestions="$(
+    "$AGENT_RAILS_BIN" check \
+      --project "$repo" \
+      --base "$base_sha" \
+      --target-ref "$target_sha" \
+      --suggestions-only
+  )"
+
+  assert_contains "$target_suggestions" "scripts/keep.sh"
+  assert_contains "$target_suggestions" "scripts/target-only.sh"
+  assert_not_contains "$target_suggestions" "scripts/delete.sh"
+}
+
 test_agent_check_suggestions_only_omits_repeated_scope() {
   local repo="$TMP_ROOT/check-suggestions-only"
   local output
@@ -344,6 +384,40 @@ test_git_scope_module_contract() {
   assert_contains "$output" "Base ref not found: refs/heads/does-not-exist"
 }
 
+test_model_preset_module_contract() {
+  (
+    # shellcheck source=scripts/agent-model-presets.sh
+    source "$ROOT_DIR/scripts/agent-model-presets.sh"
+
+    agent_model_preset_load "QWEN 3.7 MAX"
+    [[ "$AGENT_RAILS_MODEL_PRESET_FOUND" -eq 1 ]]
+    [[ "$AGENT_RAILS_MODEL_CANONICAL" == "qwen3.7-max" ]]
+    [[ "$AGENT_RAILS_MODEL_CONTEXT_TOKENS" -eq 1000000 ]]
+    [[ "$AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS" -eq 983000 ]]
+    [[ "$(agent_model_preset_budget_for_mode deep)" -eq 160000 ]]
+    agent_model_preset_known "qwen-3.7-max"
+
+    agent_model_preset_load "deepseekv4pro"
+    [[ "$AGENT_RAILS_MODEL_CANONICAL" == "deepseek-v4-pro" ]]
+    [[ "$AGENT_RAILS_MODEL_RPM" -eq 15000 ]]
+    [[ "$AGENT_RAILS_MODEL_TPM" -eq 1200000 ]]
+
+    agent_model_preset_load "generic"
+    [[ "$AGENT_RAILS_MODEL_PRESET_FOUND" -eq 0 ]]
+    [[ "$AGENT_RAILS_MODEL_CANONICAL" == "generic" ]]
+    [[ -z "$AGENT_RAILS_MODEL_CONTEXT_TOKENS" ]]
+    agent_model_preset_known "generic"
+
+    agent_model_preset_load "unknown-model"
+    [[ "$AGENT_RAILS_MODEL_PRESET_FOUND" -eq 0 ]]
+    [[ "$AGENT_RAILS_MODEL_CANONICAL" == "unknown-model" ]]
+    [[ -z "$AGENT_RAILS_MODEL_CONTEXT_TOKENS" ]]
+    [[ -z "$AGENT_RAILS_MODEL_RPM" ]]
+    [[ -z "$(agent_model_preset_budget_for_mode deep)" ]]
+    ! agent_model_preset_known "unknown-model"
+  )
+}
+
 test_estimate_uses_model_preset() {
   local output
 
@@ -595,6 +669,7 @@ test_eval_init_record_report() {
 
 run_workflow_tests() {
   run_test test_agent_check_includes_bin_entrypoint "agent-check includes bin/agent-rails"
+  run_test test_agent_check_excludes_deleted_shell_from_command "agent-check excludes deleted shell files from commands"
   run_test test_agent_check_suggestions_only_omits_repeated_scope "agent-check suggestions-only omits repeated scope"
   run_test test_agent_check_selects_changed_test_suites "agent-check selects changed test suites"
   run_test test_agent_check_run_uses_child_shell "agent-check --run uses child shell"
@@ -603,6 +678,7 @@ run_workflow_tests() {
   run_test test_publish_check_requires_deployed_baseline_when_upstream_equals_target "publish check requires deployed baseline when upstream equals target"
   run_test test_git_commands_reject_invalid_base_ref "git commands reject invalid base ref"
   run_test test_git_scope_module_contract "shared Git Scope module contract"
+  run_test test_model_preset_module_contract "shared Model Preset module contract"
   run_test test_estimate_uses_model_preset "estimate uses model preset"
   run_test test_estimate_uses_custom_tokenizer_command "estimate uses custom tokenizer command"
   run_test test_estimate_uses_deepseek_preset "estimate uses deepseek preset"

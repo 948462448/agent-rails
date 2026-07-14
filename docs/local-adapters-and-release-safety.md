@@ -19,7 +19,11 @@ This note records the design decisions behind the current local-adapter and rele
 - Existing user-authored content outside the managed Agent Rails block remains intact.
 - Codex, Claude, and OpenCode resolve profiles through the same project-aware rules.
 
-Generated-file recognition and managed-skill inventory mechanics live in the shared Adapter Lifecycle module. Guide and pack/lite/check command rendering lives in the shared Adapter Content module, with tool-specific guides and frontmatter behind one rendering Interface. Adapter entrypoints retain tool-specific CLI behavior, paths, ignore blocks, and tracked-file policy; these shared Interfaces stay narrow while preserving existing on-disk formats.
+Generated-file recognition, managed-skill inventory, tracked-path protection, generated-file writes, skill installation/removal, and local-ignore block lifecycle live in the shared Managed Adapter Workspace Module. Guide and pack/lite/check command rendering lives in the shared Adapter Content Module, with tool-specific guides and frontmatter behind one rendering Interface. Adapter entrypoints retain tool-specific CLI behavior, paths, configuration merges, and reminder or instruction blocks; the shared Interfaces preserve existing on-disk formats and output semantics.
+
+### Shared Model Presets
+
+Model aliases, canonical names, context and throughput limits, and Pack Mode token budgets live in one Model Preset Module. Task Pack generation and token estimation load the same preset data, while Doctor uses the same known-model Interface. `generic` remains a valid model name without numeric limits, and unknown names remain warning-only in Doctor so existing custom-model workflows stay compatible.
 
 ### Target And Profile Boundaries
 
@@ -29,6 +33,8 @@ Generated-file recognition and managed-skill inventory mechanics live in the sha
 - Task Packs must be regenerated after the target repository or worktree changes.
 
 These checks are guidance rather than a basename equality gate. Linked worktrees often have different directory names, and `PROJECT_NAME` may intentionally be customized, so basename matching would reject valid setups without proving repository identity.
+
+The shared Target Project Context Module canonicalizes explicit `--project` paths to their Git root, resolves the applicable Profile, records whether the target is a Git repository, and derives the effective project name, worktree slug, and default Task Pack path after configuration is loaded. Claude, OpenCode, Doctor, Run, Update, Codex, Agent Check, publish check, and memory suggestion entrypoints consume this Interface while retaining their own user-facing output and failure policy.
 
 ### Task Pack Output Safety
 
@@ -59,11 +65,13 @@ The implementation is covered by the repository test suite, including:
 
 - OpenCode install, doctor, refresh, exact-inventory uninstall, configuration merge, user-file preservation, legacy inventory migration, and local-ignore behavior.
 - Claude managed-file refresh, exact-inventory uninstall, and same-path user-file preservation behavior.
-- The shared Adapter Lifecycle Interface, including legacy generated-file signatures, inventory validation, and de-duplication.
+- The Managed Adapter Workspace Interface, including legacy generated-file signatures, inventory validation, tracked/unmanaged preservation, skill lifecycle, and idempotent local-ignore blocks.
 - The shared Adapter Content Interface, with byte-for-byte compatibility checks for Claude and OpenCode generated guides and commands.
 - SessionStart target/profile and sensitive-output guidance.
 - Task Pack `0600` permissions and generated guidance sections.
 - Task Pack failure behavior for non-file output destinations and the shared Git Scope Module Interface, including target-only snapshots that exclude working-tree changes.
+- The shared Model Preset Interface, including alias normalization, Pack Mode budgets, `generic`, unknown models, and reset behavior between loads.
+- The shared Target Project Context Interface, including nested Git paths, Profile-aware names, explicit worktree slugs, missing Profiles, and default Task Pack paths.
 - Resolved, unresolved, and invalid publish-baseline cases, plus invalid-base rejection in `pack` and `check`.
 
 Run the release checks with:

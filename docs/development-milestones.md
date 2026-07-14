@@ -42,6 +42,9 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Made publish checks require an explicit deployed-source baseline when the implicit deployment delta cannot be established.
 - Split Sensitive Output Guard evidence policy by Interface: conservative Task Pack redaction and higher-precision publish scanning over the same detection grammar.
 - Mapped publish diff findings back to source lines and excluded unchanged tracked content while retaining full scans for untracked files.
+- Extracted a shared Model Preset Module so `pack`, `estimate`, and `doctor` consume one model alias, limit, and Pack Mode budget contract.
+- Added a Target Project Context Module so command adapters share one project-root, Profile, worktree slug, and default Task Pack path contract.
+- Deepened the adapter lifecycle into a Managed Adapter Workspace Module so Claude and OpenCode share ownership, tracked-path, skill, write, and local-ignore mechanics while retaining tool-specific configuration behavior.
 - Recorded the design, tradeoffs, verification, and follow-ups in [Local Adapters And Release Safety](./local-adapters-and-release-safety.md).
 
 ## Near-Term Backlog

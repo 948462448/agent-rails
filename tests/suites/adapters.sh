@@ -54,32 +54,46 @@ test_opencode_install_doctor_and_uninstall() {
   assert_file_contains "$repo/.opencode/skills/agent-custom/SKILL.md" "user-owned"
 }
 
-test_adapter_lifecycle_module_contract() {
-  local adapter_dir="$TMP_ROOT/adapter-lifecycle-module"
+test_managed_adapter_workspace_module_contract() {
+  local project_dir="$TMP_ROOT/managed-adapter-workspace-module"
+  local adapter_dir="$project_dir/.adapter"
   local guide_path="$adapter_dir/AGENT_RAILS.md"
   local pack_path="$adapter_dir/command/agent-rails-pack.md"
   local lite_path="$adapter_dir/command/agent-rails-lite.md"
   local check_path="$adapter_dir/command/agent-rails-check.md"
   local inventory_path="$adapter_dir/.agent-rails-managed-skills"
   local unmanaged_path="$adapter_dir/command/unmanaged.md"
-  local listed_skills
-  mkdir -p "$adapter_dir/command"
+  local ignore_path="$project_dir/.git/info/exclude"
+  local listed_skills output
+  mkdir -p "$adapter_dir/command" "$adapter_dir/skills/agent-check"
+  git -C "$project_dir" init -q
 
-  # shellcheck source=scripts/agent-adapter-lifecycle.sh
-  source "$ROOT_DIR/scripts/agent-adapter-lifecycle.sh"
-  agent_adapter_lifecycle_init \
+  # shellcheck source=scripts/agent-adapter-workspace.sh
+  if [[ ! -f "$ROOT_DIR/scripts/agent-adapter-workspace.sh" ]]; then
+    printf 'Missing Managed Adapter Workspace Module.\n' >&2
+    return 1
+  fi
+  source "$ROOT_DIR/scripts/agent-adapter-workspace.sh" || return 1
+  agent_adapter_workspace_init \
     "$guide_path" \
     "$pack_path" \
     "$lite_path" \
     "$check_path" \
     "$inventory_path"
 
-  printf '<!-- agent-rails:generated -->\n' > "$guide_path"
+  printf 'team-owned\n' > "$guide_path"
+  printf 'team-owned-skill\n' > "$adapter_dir/skills/agent-check/SKILL.md"
+  git -C "$project_dir" add \
+    .adapter/AGENT_RAILS.md \
+    .adapter/skills/agent-check/SKILL.md
+  git_commit "$project_dir" init
+
   printf 'Generate and read the Agent Rails Task Pack\nAGENT RAILS: ON\n' > "$pack_path"
+  printf '<!-- agent-rails:generated -->\nstale\n' > "$lite_path"
   printf 'user-owned\n' > "$unmanaged_path"
-  agent_adapter_is_generated_file "$guide_path"
-  agent_adapter_is_generated_file "$pack_path"
-  if agent_adapter_is_generated_file "$unmanaged_path"; then
+  agent_adapter_workspace_is_generated_file "$pack_path"
+  agent_adapter_workspace_is_generated_file "$lite_path"
+  if agent_adapter_workspace_is_generated_file "$unmanaged_path"; then
     printf 'Expected unmanaged file not to be recognized as generated: %s\n' "$unmanaged_path" >&2
     exit 1
   fi
@@ -90,14 +104,32 @@ test_adapter_lifecycle_module_contract() {
     printf '../invalid\n'
     printf 'agent-check\n'
   } > "$inventory_path"
-  agent_adapter_load_managed_skills 2>/dev/null
-  agent_adapter_record_managed_skill "agent-check"
-  agent_adapter_record_managed_skill "agent-release"
-  listed_skills="$(agent_adapter_list_managed_skills)"
+  agent_adapter_workspace_load_managed_skills 2>/dev/null
+  agent_adapter_workspace_record_managed_skill "agent-check"
+  agent_adapter_workspace_record_managed_skill "agent-release"
+  listed_skills="$(agent_adapter_workspace_list_managed_skills)"
   assert_contains "$listed_skills" "agent-context-pack"
   assert_contains "$listed_skills" "agent-release"
 
-  agent_adapter_write_managed_skills "$adapter_dir" 0 >/dev/null
+  agent_adapter_workspace_configure "$project_dir" ".adapter/skills" 0 0 1 0
+
+  output="$(agent_adapter_workspace_write_generated_file "$guide_path" "replacement")"
+  assert_contains "$output" "Keeping tracked file in local mode"
+  assert_file_contains "$guide_path" "team-owned"
+
+  output="$(agent_adapter_workspace_write_generated_file "$unmanaged_path" "replacement")"
+  assert_contains "$output" "Keeping unmanaged existing file"
+  assert_file_contains "$unmanaged_path" "user-owned"
+
+  agent_adapter_workspace_write_generated_file \
+    "$lite_path" \
+    $'<!-- agent-rails:generated -->\nfresh' >/dev/null
+  assert_file_contains "$lite_path" "fresh"
+  assert_file_not_contains "$lite_path" "stale"
+
+  agent_adapter_workspace_install_skills >/dev/null
+  agent_adapter_workspace_write_managed_skills >/dev/null
+  assert_file_contains "$adapter_dir/skills/agent-check/SKILL.md" "team-owned-skill"
   assert_file_contains "$inventory_path" "agent-context-pack"
   assert_file_contains "$inventory_path" "agent-check"
   assert_file_contains "$inventory_path" "agent-release"
@@ -106,6 +138,43 @@ test_adapter_lifecycle_module_contract() {
     printf 'Expected managed skill inventory to be de-duplicated.\n' >&2
     exit 1
   fi
+
+  printf 'user-ignore\n' >> "$ignore_path"
+  agent_adapter_workspace_ensure_ignore_block \
+    "$ignore_path" \
+    "# Agent Rails test adapter" \
+    "# Agent Rails test adapter end" \
+    ".adapter/AGENT_RAILS.md" \
+    ".adapter/skills/agent-*/" >/dev/null
+  agent_adapter_workspace_ensure_ignore_block \
+    "$ignore_path" \
+    "# Agent Rails test adapter" \
+    "# Agent Rails test adapter end" \
+    ".adapter/AGENT_RAILS.md" \
+    ".adapter/skills/agent-*/" >/dev/null
+  assert_file_contains "$ignore_path" "user-ignore"
+  if [[ "$(grep -Fxc '# Agent Rails test adapter' "$ignore_path")" -ne 1 ]]; then
+    printf 'Expected local ignore block to be idempotent.\n' >&2
+    exit 1
+  fi
+
+  agent_adapter_workspace_remove_generated_file "$lite_path" >/dev/null
+  agent_adapter_workspace_remove_managed_skills >/dev/null
+  agent_adapter_workspace_remove_managed_skills_file >/dev/null
+  agent_adapter_workspace_remove_ignore_block \
+    "$ignore_path" \
+    "# Agent Rails test adapter" \
+    "# Agent Rails test adapter end" \
+    "Would remove test ignore block from" \
+    "Removed test ignore block from" \
+    ".adapter/AGENT_RAILS.md" \
+    ".adapter/skills/agent-*/" >/dev/null
+  assert_file_not_exists "$lite_path"
+  assert_file_not_exists "$adapter_dir/skills/agent-context-pack"
+  assert_file_contains "$adapter_dir/skills/agent-check/SKILL.md" "team-owned-skill"
+  assert_file_not_exists "$inventory_path"
+  assert_file_contains "$ignore_path" "user-ignore"
+  assert_file_not_contains "$ignore_path" "# Agent Rails test adapter"
 }
 
 test_adapter_content_module_contract() {
@@ -669,7 +738,7 @@ PROFILE
 
 run_adapter_foundation_tests() {
   run_test test_opencode_install_doctor_and_uninstall "opencode install/doctor/uninstall"
-  run_test test_adapter_lifecycle_module_contract "shared adapter lifecycle module contract"
+  run_test test_managed_adapter_workspace_module_contract "managed adapter workspace module contract"
   run_test test_adapter_content_module_contract "shared adapter content module contract"
   run_test test_adapter_install_preserves_unmanaged_generated_paths "adapter install preserves unmanaged generated paths"
   run_test test_opencode_migrates_legacy_adapter_to_managed_inventory "opencode migrates legacy adapter inventory"

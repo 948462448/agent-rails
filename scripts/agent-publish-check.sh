@@ -16,6 +16,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
 # shellcheck source=scripts/agent-git-scope.sh
 source "$AGENT_RAILS_HOME/scripts/agent-git-scope.sh"
 # shellcheck source=scripts/agent-sensitive-output.sh
@@ -68,16 +70,13 @@ if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   exit 2
 fi
 repo_root="$(cd "$repo_root" && pwd)"
-project_name="$(basename "$repo_root")"
 cd "$repo_root"
 
-profile_path="$(agent_rails_resolve_profile "$repo_root" "$project_name" "$profile_path_arg")"
-if [[ ! -f "$profile_path" ]]; then
-  printf 'Profile not found: %s\n' "$profile_path" >&2
-  exit 2
-fi
-# shellcheck source=/dev/null
-source "$profile_path"
+agent_target_project_resolve "$repo_root" "$profile_path_arg" || exit $?
+agent_target_project_load_profile required || exit 2
+repo_root="$AGENT_TARGET_PROJECT_ROOT"
+project_name="$AGENT_TARGET_PROJECT_DEFAULT_NAME"
+profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
 
 TARGET_REF="$target_ref"
 BASE_REF="${base_ref:-${BASE_REF:-}}"

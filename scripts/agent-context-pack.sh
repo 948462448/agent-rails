@@ -16,6 +16,8 @@ source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
 source "$AGENT_RAILS_HOME/scripts/agent-git-scope.sh"
 # shellcheck source=scripts/agent-sensitive-output.sh
 source "$AGENT_RAILS_HOME/scripts/agent-sensitive-output.sh"
+# shellcheck source=scripts/agent-model-presets.sh
+source "$AGENT_RAILS_HOME/scripts/agent-model-presets.sh"
 agent_rails_init_paths
 
 profile_path_arg=""
@@ -207,81 +209,9 @@ normalize_pack_mode() {
   esac
 }
 
-load_model_preset() {
-  local model_key
-  model_key="$(printf '%s' "$AGENT_RAILS_MODEL" | tr '[:upper:]' '[:lower:]' | tr ' _' '--')"
-
-  AGENT_RAILS_MODEL_PRESET_FOUND=0
-  AGENT_RAILS_MODEL_CANONICAL="$AGENT_RAILS_MODEL"
-  AGENT_RAILS_MODEL_CONTEXT_TOKENS=""
-  AGENT_RAILS_MODEL_MAX_INPUT_TOKENS=""
-  AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS=""
-  AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS=""
-  AGENT_RAILS_MODEL_MAX_REASONING_TOKENS=""
-  AGENT_RAILS_MODEL_RPM=""
-  AGENT_RAILS_MODEL_TPM=""
-  AGENT_RAILS_MODEL_LITE_TOKENS=""
-  AGENT_RAILS_MODEL_NORMAL_TOKENS=""
-  AGENT_RAILS_MODEL_DEEP_TOKENS=""
-  AGENT_RAILS_MODEL_AUDIT_TOKENS=""
-
-  case "$model_key" in
-    qwen3.7-max|qwen-3.7-max|qwen3.7max)
-      AGENT_RAILS_MODEL_PRESET_FOUND=1
-      AGENT_RAILS_MODEL_CANONICAL="qwen3.7-max"
-      AGENT_RAILS_MODEL_CONTEXT_TOKENS=1000000
-      AGENT_RAILS_MODEL_MAX_INPUT_TOKENS=991000
-      AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS=983000
-      AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS=64000
-      AGENT_RAILS_MODEL_MAX_REASONING_TOKENS=256000
-      AGENT_RAILS_MODEL_LITE_TOKENS=24000
-      AGENT_RAILS_MODEL_NORMAL_TOKENS=60000
-      AGENT_RAILS_MODEL_DEEP_TOKENS=160000
-      AGENT_RAILS_MODEL_AUDIT_TOKENS=320000
-      ;;
-    deepseek-v4-pro|deepseekv4pro|deepseek-v4pro|deepseek-v4|deepseek4-pro)
-      AGENT_RAILS_MODEL_PRESET_FOUND=1
-      AGENT_RAILS_MODEL_CANONICAL="deepseek-v4-pro"
-      AGENT_RAILS_MODEL_CONTEXT_TOKENS=1000000
-      AGENT_RAILS_MODEL_MAX_INPUT_TOKENS=1000000
-      AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS=""
-      AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS=384000
-      AGENT_RAILS_MODEL_MAX_REASONING_TOKENS=""
-      AGENT_RAILS_MODEL_RPM=15000
-      AGENT_RAILS_MODEL_TPM=1200000
-      AGENT_RAILS_MODEL_LITE_TOKENS=24000
-      AGENT_RAILS_MODEL_NORMAL_TOKENS=60000
-      AGENT_RAILS_MODEL_DEEP_TOKENS=160000
-      AGENT_RAILS_MODEL_AUDIT_TOKENS=320000
-      ;;
-    glm5.1|glm-5.1|glm51)
-      AGENT_RAILS_MODEL_PRESET_FOUND=1
-      AGENT_RAILS_MODEL_CANONICAL="glm5.1"
-      AGENT_RAILS_MODEL_CONTEXT_TOKENS=202000
-      AGENT_RAILS_MODEL_MAX_INPUT_TOKENS=202000
-      AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS=166000
-      AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS=128000
-      AGENT_RAILS_MODEL_MAX_REASONING_TOKENS=""
-      AGENT_RAILS_MODEL_LITE_TOKENS=12000
-      AGENT_RAILS_MODEL_NORMAL_TOKENS=24000
-      AGENT_RAILS_MODEL_DEEP_TOKENS=60000
-      AGENT_RAILS_MODEL_AUDIT_TOKENS=100000
-      ;;
-  esac
-}
-
-preset_budget_for_mode() {
-  case "$AGENT_RAILS_PACK_MODE" in
-    lite) printf '%s\n' "${AGENT_RAILS_MODEL_LITE_TOKENS:-}" ;;
-    normal) printf '%s\n' "${AGENT_RAILS_MODEL_NORMAL_TOKENS:-}" ;;
-    deep) printf '%s\n' "${AGENT_RAILS_MODEL_DEEP_TOKENS:-}" ;;
-    audit) printf '%s\n' "${AGENT_RAILS_MODEL_AUDIT_TOKENS:-}" ;;
-  esac
-}
-
 AGENT_RAILS_PACK_MODE="$(normalize_pack_mode "$AGENT_RAILS_PACK_MODE")"
 AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="$(normalize_positive_int "$AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE" 2)"
-load_model_preset
+agent_model_preset_load "$AGENT_RAILS_MODEL"
 
 context_budget_chars_input="$(normalize_optional_positive_int "$AGENT_RAILS_CONTEXT_BUDGET_CHARS")"
 context_budget_tokens_input="$(normalize_optional_positive_int "$AGENT_RAILS_CONTEXT_BUDGET_TOKENS")"
@@ -297,7 +227,7 @@ elif [[ -n "$context_budget_tokens_input" ]]; then
   AGENT_RAILS_CONTEXT_BUDGET_CHARS="$((AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE * AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE))"
   AGENT_RAILS_CONTEXT_BUDGET_SOURCE="token budget"
 elif [[ "$AGENT_RAILS_MODEL_PRESET_FOUND" -eq 1 ]]; then
-  preset_tokens="$(preset_budget_for_mode)"
+  preset_tokens="$(agent_model_preset_budget_for_mode "$AGENT_RAILS_PACK_MODE")"
   if [[ -n "$preset_tokens" ]]; then
     AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE="$preset_tokens"
     AGENT_RAILS_CONTEXT_BUDGET_CHARS="$((AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE * AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE))"

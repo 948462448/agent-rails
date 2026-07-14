@@ -11,6 +11,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
 # shellcheck source=scripts/agent-git-scope.sh
 source "$AGENT_RAILS_HOME/scripts/agent-git-scope.sh"
 agent_rails_init_paths
@@ -69,25 +71,12 @@ if [[ "$suggestions_only" -eq 1 && "$run_commands" -eq 1 ]]; then
   exit 2
 fi
 
-if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-  is_git_repo=1
-  repo_root="$(cd "$repo_root" && pwd)"
-  cd "$repo_root"
-else
-  is_git_repo=0
-  repo_root="$PWD"
-fi
-
-profile_path="$(agent_rails_resolve_profile "$repo_root" "$(basename "$repo_root")" "$profile_path_arg")"
-if [[ ! -f "$profile_path" ]]; then
-  printf 'Profile not found: %s\n' "$profile_path" >&2
-  exit 2
-fi
-
-if [[ -f "$profile_path" ]]; then
-  # shellcheck source=/dev/null
-  source "$profile_path"
-fi
+agent_target_project_resolve "$PWD" "$profile_path_arg" || exit $?
+agent_target_project_load_profile required || exit 2
+repo_root="$AGENT_TARGET_PROJECT_ROOT"
+profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
+is_git_repo="$AGENT_TARGET_PROJECT_IS_GIT_REPO"
+cd "$repo_root"
 
 TARGET_REF="$target_ref"
 BASE_REF="${base_ref:-${BASE_REF:-}}"
@@ -144,6 +133,15 @@ has_changed() {
   grep -Eq "$pattern" "$changed_file_list"
 }
 
+verification_file_exists() {
+  local path="$1"
+  if [[ "$target_ref_explicit" -eq 1 ]]; then
+    git cat-file -e "$AGENT_GIT_SCOPE_TARGET_SHA:$path" 2>/dev/null
+  else
+    [[ -f "$path" ]]
+  fi
+}
+
 if has_changed '^contracts/'; then
   add_command "contracts changed" "${VERIFY_CONTRACTS:-}"
 fi
@@ -187,8 +185,16 @@ elif has_changed '^dolphin/'; then
 fi
 
 if has_changed '^(bin/agent-rails|scripts/.*\.sh)$'; then
-  shell_files="$(grep -E '^(bin/agent-rails|scripts/.*\.sh)$' "$changed_file_list" | tr '\n' ' ')"
-  add_command "shell entrypoints changed" "${VERIFY_SHELL:-bash -n ${shell_files}}"
+  shell_files="$(
+    while IFS= read -r shell_file; do
+      if verification_file_exists "$shell_file"; then
+        printf '%q ' "$shell_file"
+      fi
+    done < <(grep -E '^(bin/agent-rails|scripts/.*\.sh)$' "$changed_file_list")
+  )"
+  if [[ -n "$shell_files" ]]; then
+    add_command "shell entrypoints changed" "${VERIFY_SHELL:-bash -n ${shell_files}}"
+  fi
 fi
 
 if has_changed '^tests/.*\.sh$'; then

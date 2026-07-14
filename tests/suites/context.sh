@@ -1,5 +1,69 @@
 # Task Pack, memory, profile, and project-context tests.
 
+test_target_project_context_module_contract() {
+  local repo="$TMP_ROOT/target-project-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/target-project-context.profile"
+  local missing_profile="$TMP_ROOT/missing-target-project-context.profile"
+  local config_home="$TMP_ROOT/target-project-context-home"
+  local repo_abs expected_slug output
+  mkdir -p "$nested"
+  git -C "$repo" init -q
+  printf '# target project\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  repo_abs="$(cd "$repo" && pwd -P)"
+  {
+    printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
+    printf 'PROJECT_NAME="profile-project"\n'
+    printf 'AGENT_RAILS_CONFIG_HOME="%s"\n' "$config_home"
+  } > "$profile"
+
+  (
+    unset PROJECT_ROOT PROJECT_NAME PROJECT_WORKTREE_SLUG TASK_PACK_PATH
+    # shellcheck source=scripts/agent-paths.sh
+    source "$ROOT_DIR/scripts/agent-paths.sh"
+    # shellcheck source=scripts/agent-target-project.sh
+    source "$ROOT_DIR/scripts/agent-target-project.sh"
+
+    unset AGENT_TARGET_PROJECT_PROFILE_PATH
+    if output="$(agent_target_project_load_profile 2>&1)"; then
+      printf 'Expected Profile loading before Target Project resolution to fail.\n' >&2
+      exit 1
+    fi
+    assert_contains "$output" "Resolve a Target Project before loading its Profile."
+
+    agent_target_project_resolve "$nested" "$profile"
+    [[ "$AGENT_TARGET_PROJECT_ROOT" == "$repo_abs" ]]
+    [[ "$AGENT_TARGET_PROJECT_DEFAULT_NAME" == "target-project-context" ]]
+    [[ "$AGENT_TARGET_PROJECT_PROFILE_PATH" == "$profile" ]]
+    [[ "$AGENT_TARGET_PROJECT_IS_GIT_REPO" -eq 1 ]]
+    [[ "$AGENT_TARGET_PROJECT_PROFILE_STATUS" == "unloaded" ]]
+
+    agent_target_project_load_profile
+    expected_slug="$(agent_rails_project_worktree_slug "$repo_abs" "profile-project")"
+    [[ "$PROJECT_ROOT" == "$repo_abs" ]]
+    [[ "$PROJECT_NAME" == "profile-project" ]]
+    [[ "$PROJECT_WORKTREE_SLUG" == "$expected_slug" ]]
+    [[ "$AGENT_TARGET_PROJECT_PROFILE_STATUS" == "loaded" ]]
+    [[ "$AGENT_TARGET_PROJECT_TASK_PACK_PATH" == "$config_home/agent-context/$expected_slug-task-pack.md" ]]
+
+    unset PROJECT_ROOT PROJECT_NAME PROJECT_WORKTREE_SLUG TASK_PACK_PATH
+    PROJECT_WORKTREE_SLUG="explicit-worktree"
+    agent_target_project_resolve "$repo" "$profile"
+    agent_target_project_load_profile
+    [[ "$PROJECT_WORKTREE_SLUG" == "explicit-worktree" ]]
+
+    unset PROJECT_ROOT PROJECT_NAME PROJECT_WORKTREE_SLUG TASK_PACK_PATH
+    agent_target_project_resolve "$repo" "$missing_profile"
+    if agent_target_project_load_profile; then
+      printf 'Expected a missing Target Project Profile to fail.\n' >&2
+      exit 1
+    fi
+    [[ "$AGENT_TARGET_PROJECT_PROFILE_STATUS" == "missing" ]]
+  )
+}
+
 test_claude_commands_use_current_worktree_root() {
   local repo="$TMP_ROOT/current-worktree-root"
   local profile="$TMP_ROOT/custom.profile"
@@ -596,6 +660,7 @@ test_run_uses_user_agent_rails_profile() {
 }
 
 run_context_tests() {
+  run_test test_target_project_context_module_contract "shared Target Project Context module contract"
   run_test test_claude_commands_use_current_worktree_root "claude commands use current worktree root"
   run_test test_pack_embeds_local_memory_with_budget "pack embeds local memory with budget"
   run_test test_pack_skips_unmatched_local_memory "pack skips unmatched local memory"

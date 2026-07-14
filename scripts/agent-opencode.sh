@@ -19,8 +19,10 @@ AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
-# shellcheck source=scripts/agent-adapter-lifecycle.sh
-source "$AGENT_RAILS_HOME/scripts/agent-adapter-lifecycle.sh"
+# shellcheck source=scripts/agent-target-project.sh
+source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
+# shellcheck source=scripts/agent-adapter-workspace.sh
+source "$AGENT_RAILS_HOME/scripts/agent-adapter-workspace.sh"
 # shellcheck source=scripts/agent-adapter-content.sh
 source "$AGENT_RAILS_HOME/scripts/agent-adapter-content.sh"
 agent_rails_init_paths
@@ -71,32 +73,12 @@ if [[ ! -d "$project" ]]; then
   exit 2
 fi
 
-project_abs="$(cd "$project" && pwd)"
-if git_root_for_project="$(git -C "$project_abs" rev-parse --show-toplevel 2>/dev/null)"; then
-  project_abs="$(cd "$git_root_for_project" && pwd)"
-fi
-project_name="$(basename "$project_abs")"
-is_git_repo=0
-if command -v git >/dev/null 2>&1 && git -C "$project_abs" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  is_git_repo=1
-fi
-
-profile_path="$(agent_rails_resolve_profile "$project_abs" "$project_name" "$profile_path")"
-if [[ ! -f "$profile_path" ]]; then
-  printf 'Profile not found: %s\n' "$profile_path" >&2
-  exit 2
-fi
-
-# shellcheck source=/dev/null
-source "$profile_path"
-PROJECT_NAME="${PROJECT_NAME:-$project_name}"
-PROJECT_WORKTREE_SLUG_PRESET="${PROJECT_WORKTREE_SLUG:-}"
-if [[ -n "$PROJECT_WORKTREE_SLUG_PRESET" ]]; then
-  PROJECT_WORKTREE_SLUG="$PROJECT_WORKTREE_SLUG_PRESET"
-else
-  PROJECT_WORKTREE_SLUG="$(agent_rails_project_worktree_slug "$project_abs" "$PROJECT_NAME")"
-fi
-task_pack_path="${TASK_PACK_PATH:-$(agent_rails_default_task_pack_path "$PROJECT_WORKTREE_SLUG")}"
+agent_target_project_resolve "$project" "$profile_path" || exit $?
+agent_target_project_load_profile required || exit 2
+project_abs="$AGENT_TARGET_PROJECT_ROOT"
+profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
+is_git_repo="$AGENT_TARGET_PROJECT_IS_GIT_REPO"
+task_pack_path="$AGENT_TARGET_PROJECT_TASK_PACK_PATH"
 
 opencode_dir="$project_abs/.opencode"
 skills_dir="$opencode_dir/skills"
@@ -108,7 +90,7 @@ check_command_path="$commands_dir/agent-rails-check.md"
 opencode_config_path="$opencode_dir/opencode.json"
 opencode_instruction_path="$guide_path"
 managed_skills_path="$opencode_dir/.agent-rails-managed-skills"
-agent_adapter_lifecycle_init \
+agent_adapter_workspace_init \
   "$guide_path" \
   "$pack_command_path" \
   "$lite_command_path" \
@@ -124,174 +106,18 @@ if [[ "$is_git_repo" -eq 1 ]]; then
   esac
 fi
 
-say_write() {
-  if [[ "$dry_run" -eq 1 ]]; then
-    printf 'Would write %s\n' "$1"
-  else
-    printf 'Wrote %s\n' "$1"
-  fi
-}
-
-is_tracked_file() {
-  local path="$1"
-  local rel_path
-  [[ "$is_git_repo" -eq 1 ]] || return 1
-  case "$path" in
-    "$project_abs"/*) rel_path="${path#$project_abs/}" ;;
-    *) return 1 ;;
-  esac
-  git -C "$project_abs" ls-files -- "$rel_path" 2>/dev/null | grep -Fxq "$rel_path"
-}
-
-is_tracked_prefix() {
-  local rel_path="$1"
-  [[ "$is_git_repo" -eq 1 ]] || return 1
-  [[ -n "$(git -C "$project_abs" ls-files -- "$rel_path" 2>/dev/null | sed -n '1p')" ]]
-}
-
-write_managed_skills() {
-  if [[ "$force" -ne 1 ]] && is_tracked_file "$managed_skills_path"; then
-    printf 'Keeping tracked managed skill inventory in local mode: %s\n' "$managed_skills_path"
-    return 0
-  fi
-  agent_adapter_write_managed_skills "$opencode_dir" "$dry_run"
-}
-
-agent_adapter_load_managed_skills
+agent_adapter_workspace_load_managed_skills
 legacy_adapter=0
-if [[ ! -f "$managed_skills_path" ]] && agent_adapter_is_generated_file "$guide_path"; then
+if [[ ! -f "$managed_skills_path" ]] && agent_adapter_workspace_is_generated_file "$guide_path"; then
   legacy_adapter=1
 fi
-
-write_file() {
-  local path="$1"
-  local content="$2"
-
-  if [[ "$force" -ne 1 ]] && is_tracked_file "$path"; then
-    printf 'Keeping tracked file in local mode: %s\n' "$path"
-    return 0
-  fi
-
-  if [[ -e "$path" && "$force" -ne 1 ]] && ! agent_adapter_is_generated_file "$path"; then
-    printf 'Keeping unmanaged existing file: %s\n' "$path"
-    return 0
-  fi
-
-  if [[ -e "$path" && "$force" -ne 1 ]]; then
-    printf 'Refreshing Agent Rails-generated %s\n' "$path"
-  fi
-
-  if [[ "$dry_run" -eq 1 ]]; then
-    say_write "$path"
-    return 0
-  fi
-
-  mkdir -p "$(dirname "$path")"
-  printf '%s\n' "$content" > "$path"
-  say_write "$path"
-}
-
-install_skills() {
-  local args=(--dest "$skills_dir")
-  local selected_skills=()
-  local selected_skill_count=0
-  local skill_dir skill_name target_dir
-  [[ "$dry_run" -eq 1 ]] && args+=(--dry-run)
-
-  if [[ -d "$AGENT_RAILS_HOME/skills" ]]; then
-    while IFS= read -r skill_dir; do
-      skill_name="$(basename "$skill_dir")"
-      target_dir="$skills_dir/$skill_name"
-      if [[ "$force" -ne 1 ]] && is_tracked_prefix ".opencode/skills/$skill_name"; then
-        printf 'Keeping tracked skill directory in local mode: %s\n' "$project_abs/.opencode/skills/$skill_name"
-      elif [[ -e "$target_dir" && "$force" -ne 1 && "$legacy_adapter" -ne 1 ]] \
-        && ! agent_adapter_managed_skill_is_recorded "$skill_name"; then
-        printf 'Keeping unmanaged existing skill directory: %s\n' "$target_dir"
-      else
-        selected_skills+=("$skill_name")
-        selected_skill_count=$((selected_skill_count + 1))
-        agent_adapter_record_managed_skill "$skill_name"
-      fi
-    done < <(find "$AGENT_RAILS_HOME/skills" -mindepth 1 -maxdepth 1 -type d | sort)
-  fi
-
-  if [[ "$selected_skill_count" -eq 0 ]]; then
-    printf 'No Agent Rails skills to install.\n'
-    return 0
-  fi
-
-  args+=("${selected_skills[@]}")
-  "$AGENT_RAILS_HOME/scripts/agent-install-skills.sh" "${args[@]}"
-}
-
-append_local_ignore() {
-  local marker="# Agent Rails opencode adapter"
-  local end_marker="# Agent Rails opencode adapter end"
-
-  if [[ "$dry_run" -eq 1 ]]; then
-    printf 'Would ensure local ignore entries in %s\n' "$local_ignore_path"
-    printf '  .opencode/AGENT_RAILS.md\n'
-    printf '  .opencode/.agent-rails-managed-skills\n'
-    printf '  .opencode/opencode.json\n'
-    printf '  .opencode/command/agent-rails-pack.md\n'
-    printf '  .opencode/command/agent-rails-lite.md\n'
-    printf '  .opencode/command/agent-rails-check.md\n'
-    printf '  .opencode/skills/agent-*/\n'
-    printf '  .agent-rails/\n'
-    return 0
-  fi
-
-  mkdir -p "$(dirname "$local_ignore_path")"
-  if [[ -f "$local_ignore_path" ]] && grep -Fxq "$marker" "$local_ignore_path"; then
-    local tmp_file
-    tmp_file="$(mktemp)"
-    awk -v marker="$marker" -v end_marker="$end_marker" '
-      $0 == marker { in_block = 1; next }
-      in_block && $0 == end_marker { in_block = 0; next }
-      !in_block { print }
-    ' "$local_ignore_path" > "$tmp_file"
-    mv "$tmp_file" "$local_ignore_path"
-  fi
-
-  if ! {
-    [[ -s "$local_ignore_path" ]] && printf '\n'
-    printf '%s\n' "$marker"
-    printf '.opencode/AGENT_RAILS.md\n'
-    printf '.opencode/.agent-rails-managed-skills\n'
-    printf '.opencode/opencode.json\n'
-    printf '.opencode/command/agent-rails-pack.md\n'
-    printf '.opencode/command/agent-rails-lite.md\n'
-    printf '.opencode/command/agent-rails-check.md\n'
-    printf '.opencode/skills/agent-*/\n'
-    printf '.agent-rails/\n'
-    printf '%s\n' "$end_marker"
-  } >> "$local_ignore_path"; then
-    printf 'Failed to update local ignore file: %s\n' "$local_ignore_path" >&2
-    exit 1
-  fi
-  printf 'Updated local ignore file: %s\n' "$local_ignore_path"
-}
-
-remove_local_ignore() {
-  local marker="# Agent Rails opencode adapter"
-  local end_marker="# Agent Rails opencode adapter end"
-
-  [[ -f "$local_ignore_path" ]] || return 0
-  if [[ "$dry_run" -eq 1 ]]; then
-    printf 'Would remove local ignore entries from %s\n' "$local_ignore_path"
-    return 0
-  fi
-
-  local tmp_file
-  tmp_file="$(mktemp)"
-  awk -v marker="$marker" -v end_marker="$end_marker" '
-    $0 == marker { in_block = 1; next }
-    in_block && $0 == end_marker { in_block = 0; next }
-    !in_block { print }
-  ' "$local_ignore_path" > "$tmp_file"
-  mv "$tmp_file" "$local_ignore_path"
-  printf 'Updated local ignore file: %s\n' "$local_ignore_path"
-}
+agent_adapter_workspace_configure \
+  "$project_abs" \
+  ".opencode/skills" \
+  "$dry_run" \
+  "$force" \
+  1 \
+  "$legacy_adapter"
 
 require_python_for_config() {
   if ! command -v python3 >/dev/null 2>&1; then
@@ -301,7 +127,7 @@ require_python_for_config() {
 }
 
 merge_opencode_config() {
-  if [[ "$force" -ne 1 ]] && is_tracked_file "$opencode_config_path"; then
+  if [[ "$force" -ne 1 ]] && agent_adapter_workspace_is_tracked_file "$opencode_config_path"; then
     printf 'Keeping tracked opencode config in local mode: %s\n' "$opencode_config_path"
     if grep -Fq "$opencode_instruction_path" "$opencode_config_path" 2>/dev/null; then
       printf '[OK] Tracked opencode config already references Agent Rails instructions.\n'
@@ -357,7 +183,7 @@ PY
 
 remove_opencode_config_instruction() {
   [[ -f "$opencode_config_path" ]] || return 0
-  if [[ "$force" -ne 1 ]] && is_tracked_file "$opencode_config_path"; then
+  if [[ "$force" -ne 1 ]] && agent_adapter_workspace_is_tracked_file "$opencode_config_path"; then
     printf 'Keeping tracked opencode config in local mode: %s\n' "$opencode_config_path"
     return 0
   fi
@@ -399,64 +225,6 @@ PY
   else
     printf 'Removed empty %s\n' "$opencode_config_path"
   fi
-}
-
-remove_generated_path() {
-  local path="$1"
-  if [[ "$force" -ne 1 ]] && is_tracked_file "$path"; then
-    printf 'Keeping tracked file in local mode: %s\n' "$path"
-    return 0
-  fi
-  if [[ ! -e "$path" ]]; then
-    return 0
-  fi
-  if [[ "$path" != "$managed_skills_path" && "$force" -ne 1 ]] \
-    && ! agent_adapter_is_generated_file "$path"; then
-    printf 'Keeping unmanaged existing file: %s\n' "$path"
-    return 0
-  fi
-  if [[ "$dry_run" -eq 1 ]]; then
-    printf 'Would remove %s\n' "$path"
-  else
-    rm -f "$path"
-    printf 'Removed %s\n' "$path"
-  fi
-}
-
-remove_generated_skills() {
-  local index skill_name skill_dir
-  local skills_to_remove=()
-  local skills_to_remove_count=0
-  [[ -d "$skills_dir" ]] || return 0
-
-  if [[ -f "$managed_skills_path" ]]; then
-    while IFS= read -r skill_name; do
-      skills_to_remove+=("$skill_name")
-      skills_to_remove_count=$((skills_to_remove_count + 1))
-    done < <(agent_adapter_list_managed_skills)
-  elif [[ "$legacy_adapter" -eq 1 && -d "$AGENT_RAILS_HOME/skills" ]]; then
-    while IFS= read -r skill_dir; do
-      skills_to_remove+=("$(basename "$skill_dir")")
-      skills_to_remove_count=$((skills_to_remove_count + 1))
-    done < <(find "$AGENT_RAILS_HOME/skills" -mindepth 1 -maxdepth 1 -type d | sort)
-  fi
-
-  for ((index = 0; index < skills_to_remove_count; index++)); do
-    skill_name="${skills_to_remove[$index]}"
-    agent_adapter_is_valid_managed_skill_name "$skill_name" || continue
-    skill_dir="$skills_dir/$skill_name"
-    [[ -e "$skill_dir" ]] || continue
-    if [[ "$force" -ne 1 ]] && is_tracked_prefix ".opencode/skills/$skill_name"; then
-      printf 'Keeping tracked skill directory in local mode: %s\n' "$skill_dir"
-      continue
-    fi
-    if [[ "$dry_run" -eq 1 ]]; then
-      printf 'Would remove %s\n' "$skill_dir"
-    else
-      rm -rf "$skill_dir"
-      printf 'Removed %s\n' "$skill_dir"
-    fi
-  done
 }
 
 print_status() {
@@ -501,14 +269,25 @@ case "$subcommand" in
     printf 'Version: %s\n' "$AGENT_RAILS_VERSION"
     printf 'Project: %s\n' "$project_abs"
     printf 'Profile: %s\n' "$profile_path"
-    install_skills
-    write_file "$guide_path" "$guide_content"
-    write_file "$pack_command_path" "$pack_command_content"
-    write_file "$lite_command_path" "$lite_command_content"
-    write_file "$check_command_path" "$check_command_content"
+    agent_adapter_workspace_install_skills
+    agent_adapter_workspace_write_generated_file "$guide_path" "$guide_content"
+    agent_adapter_workspace_write_generated_file "$pack_command_path" "$pack_command_content"
+    agent_adapter_workspace_write_generated_file "$lite_command_path" "$lite_command_content"
+    agent_adapter_workspace_write_generated_file "$check_command_path" "$check_command_content"
     merge_opencode_config
-    write_managed_skills
-    append_local_ignore
+    agent_adapter_workspace_write_managed_skills
+    agent_adapter_workspace_ensure_ignore_block \
+      "$local_ignore_path" \
+      "# Agent Rails opencode adapter" \
+      "# Agent Rails opencode adapter end" \
+      ".opencode/AGENT_RAILS.md" \
+      ".opencode/.agent-rails-managed-skills" \
+      ".opencode/opencode.json" \
+      ".opencode/command/agent-rails-pack.md" \
+      ".opencode/command/agent-rails-lite.md" \
+      ".opencode/command/agent-rails-check.md" \
+      ".opencode/skills/agent-*/" \
+      ".agent-rails/"
     printf '\nopencode adapter ready.\n'
     printf 'Task Pack: %s\n' "$task_pack_path"
     printf 'Restart opencode or open a new opencode session for config changes to take effect.\n'
@@ -521,13 +300,26 @@ case "$subcommand" in
   uninstall)
     printf 'Agent Rails opencode Uninstall\n'
     remove_opencode_config_instruction
-    remove_generated_path "$guide_path"
-    remove_generated_path "$pack_command_path"
-    remove_generated_path "$lite_command_path"
-    remove_generated_path "$check_command_path"
-    remove_generated_skills
-    remove_generated_path "$managed_skills_path"
-    remove_local_ignore
+    agent_adapter_workspace_remove_generated_file "$guide_path"
+    agent_adapter_workspace_remove_generated_file "$pack_command_path"
+    agent_adapter_workspace_remove_generated_file "$lite_command_path"
+    agent_adapter_workspace_remove_generated_file "$check_command_path"
+    agent_adapter_workspace_remove_managed_skills
+    agent_adapter_workspace_remove_managed_skills_file
+    agent_adapter_workspace_remove_ignore_block \
+      "$local_ignore_path" \
+      "# Agent Rails opencode adapter" \
+      "# Agent Rails opencode adapter end" \
+      "Would remove local ignore entries from" \
+      "Updated local ignore file:" \
+      ".opencode/AGENT_RAILS.md" \
+      ".opencode/.agent-rails-managed-skills" \
+      ".opencode/opencode.json" \
+      ".opencode/command/agent-rails-pack.md" \
+      ".opencode/command/agent-rails-lite.md" \
+      ".opencode/command/agent-rails-check.md" \
+      ".opencode/skills/agent-*/" \
+      ".agent-rails/"
     if [[ "$dry_run" -ne 1 ]]; then
       rmdir "$commands_dir" "$skills_dir" "$opencode_dir" 2>/dev/null || true
     fi

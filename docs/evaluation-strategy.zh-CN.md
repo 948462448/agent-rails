@@ -33,21 +33,29 @@ Agent Rails 实验组：
 - 在 token 预算相同的情况下，它是否提高了质量？
 - 更高的 Pack Mode 是否提供了足够的边际收益，值得付出额外上下文成本？
 
-## 为什么现有 Eval 还不是这个实验
+## 为什么评测放在 Agent Rails 之外
 
-当前的 `agent-rails eval` 可以记录运行过程，但它还不是一个能够证明 Agent
-Rails 因果效果的评测框架：
+评测是证明 Agent Rails 是否有效的证据，不是 Agent Rails 的运行时能力。产品 CLI
+应聚焦上下文生成、注入、adapter 和确定性检查；独立评测器负责实验组、TUI 产物
+录制、judge 接入和配对报告。
 
-- `eval record --mode baseline` 仍然会调用 `agent-rails run` 和
-  `agent-rails check`；目前 `mode` 只改变日志里的标签，不会改变实验处理。
-- 当前所谓“运行成功”，只表示 Task Pack 生成和 Agent Check 执行成功，并不
-  表示 agent 真正完成了任务。
-- tokenizer 输出估算的是 Task Pack 大小，并没有记录 coding-agent 完整运行中
-  provider 返回的输入、缓存输入、推理和输出 token。
-- 当前报告只展示日志和退出码，没有计算配对后的质量差和 token 差。
+原先的内置运行日志命令已经移除，因为 baseline 标签并不能生成真实 baseline：它
+仍会经过 Agent Rails 能力，把命令完成当成任务成功，并且只能测量 Task Pack 估算，
+不能得到 provider 的完整 session 用量。继续把这条链路放在产品 CLI 中，会让接口
+看起来比证据更完整。
 
-因此，第一个实现里程碑必须先修正真实基线。在 `off` 能够绕过所有 Agent Rails
+因此，第一个评测里程碑仍然必须先建立真实基线。在 `off` 能够绕过所有 Agent Rails
 能力之前，扩充任务集没有意义。
+
+## TUI 黑盒执行
+
+评测器不需要自动操作开发 TUI。同一个任务分别在两个隔离 worktree 和全新 TUI
+会话中完成，然后录制 patch、最终回答、验证输出和可选 provider usage。独立 Python
+工具只负责匿名化这些产物，并通过 stdin 调用任意受信任的大模型 judge 命令。
+
+默认盲评执行两轮镜像对比：第二轮交换 Response A 和 Response B。只有两轮揭盲后
+都映射到同一实验组，才认为结果不受位置影响。可运行流程见
+[TUI 黑盒 A/B 盲评手册](./tui-ab-eval.zh-CN.md)。
 
 ## 评测问题
 
@@ -317,15 +325,15 @@ Rails 实验组只有同时满足以下条件，才值得继续推进：
 
 ### M1：真实基线与运行清单
 
-- 将自由文本 `mode` 标签替换成明确的实验组契约，同时在存储输出中兼容旧标签。
-- 新增 baseline runner，直接调用底层 coding agent。
+- 在独立运行清单中定义明确的实验组契约。
+- 录制已经完成的 TUI 黑盒运行，`off` 组不得经过任何 Agent Rails 能力。
 - 记录仓库 SHA、dirty-state 策略、模型/harness 版本、实验组、Pack Mode、重复
   编号、注入产物和环境指纹。
 - 一旦发现 baseline 污染，评测框架必须直接失败。
 
-### M2：执行任务并评分
+### M2：录制任务并评分
 
-- 新增 agent-runner 接口，不再止步于 `agent-rails run`。
+- 录制每次 TUI 运行的最终 patch、最终回答、验证输出和可选 usage。
 - 每个实验单元都恢复一个干净的任务环境。
 - Agent 退出后执行验收检查和 scope 检查。
 - 区分初始化失败、agent 运行失败和任务评分失败。
@@ -352,20 +360,20 @@ Rails 实验组只有同时满足以下条件，才值得继续推进：
 
 - 宣称一个 Pack Mode 在所有任务上都最好。
 - 只优化 Task Pack 大小，忽略完整 session token。
-- 把 `eval record` 命令成功当作任务成功。
+- 把 TUI 或录制命令成功当作任务成功。
 - 在可以执行验收的情况下，只使用 LLM judge 判断正确性。
 - 在保留评测任务上训练或调参。
 - 把 ContextBench、GitHub stars 或 leaderboard 排名当作 Agent Rails 有效的证明。
 
 ## 第一个实现切片
 
-本文档之后的第一个代码改动应刻意保持很小：
+第一个实现切片应刻意保持很小：
 
-1. 引入一个绝对不能调用 Agent Rails 的真实 `off` 实验组；
-2. 分别为 `off` 和强制 `lite` 运行一次底层 agent command；
-3. 执行一条验收命令；
-4. 当 runner 能够提供时，存储真实 token 用量；
-5. 渲染一行包含任务成功状态和 token 差值的配对结果。
+1. 在隔离的 `off` 和强制 `lite` TUI 会话中运行同一个任务；
+2. 使用独立 Python 工具录制两边的 patch、最终回答和验证输出；
+3. 执行一条确定性验收命令；
+4. 当 TUI 或 provider 能够提供时，存储真实 token 用量；
+5. 执行双轮镜像盲评，揭盲输出一条包含质量和 token 差值的配对结果。
 
-在这个切片真正端到端跑通之前，继续增加 benchmark 任务或自动 judge 只会增加
-数据量，仍然回答不了最核心的因果问题。
+在这个切片真正端到端跑通之前，继续增加 benchmark 任务只会增加数据量，仍然
+回答不了最核心的因果问题。

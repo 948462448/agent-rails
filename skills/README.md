@@ -29,7 +29,6 @@ What not to copy:
 | Skill | Invocation | Purpose |
 |-------|------------|---------|
 | `agent-run-loop` | model or user | Start the guided pack -> estimate -> check -> memory-curator loop |
-| `agent-eval` | model or user | Build eval datasets and record JSONL run logs |
 | `agent-context-pack` | model or user | Generate/read a deep or lite Task Pack before engineering work |
 | `agent-grill` | model or user | Stress-test uncertain plans before implementation |
 | `agent-check` | model or user | Select verification commands from changed paths |

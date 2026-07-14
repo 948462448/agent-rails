@@ -679,7 +679,6 @@ test_doctor_ok_after_local_install() {
   assert_contains "$output" "Claude adapter version: $EXPECTED_AGENT_RAILS_VERSION"
   assert_contains "$output" "Agent Rails adapter files are ignored locally"
   assert_contains "$output" "skill installed: agent-grill"
-  assert_contains "$output" "skill installed: agent-eval"
   assert_contains "$output" "skill installed: agent-refactor"
   assert_contains "$output" "skill installed: agent-tdd"
   assert_contains "$output" "Doctor status: OK"

@@ -147,6 +147,8 @@ agent-rails upgrade self --version 0.6.0
 
 - [中文 CLI 参考](./docs/cli-reference.zh-CN.md)
 - [English CLI Reference](./docs/cli-reference.en.md)
+- [Agent Rails 工作原理（含架构图与流程图）](./docs/how-agent-rails-works.zh-CN.md)
+- [How Agent Rails Works](./docs/how-agent-rails-works.en.md)
 - [设计与安全边界](./docs/local-adapters-and-release-safety.md)
 - [GitHub Release 分发设计](./docs/github-release-distribution.md)
 - [更新记录](./CHANGELOG.md)

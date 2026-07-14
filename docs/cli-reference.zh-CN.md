@@ -128,6 +128,8 @@ Managed Adapter Workspace 只刷新或删除带 Agent Rails ownership marker 的
 ## 相关设计
 
 - [Agent Rails Context](../CONTEXT.md)
+- [Agent Rails 工作原理](./how-agent-rails-works.zh-CN.md)
+- [How Agent Rails Works](./how-agent-rails-works.en.md)
 - [Local Adapters And Release Safety](./local-adapters-and-release-safety.md)
 - [GitHub Release Distribution](./github-release-distribution.md)
 - [Development Milestones](./development-milestones.md)

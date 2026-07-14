@@ -2,6 +2,8 @@
 
 This note records the design decisions behind the current local-adapter and release-safety iteration. Agent Rails remains a generic, personal kit: target repositories supply their own project context, while the kit provides reusable workflow guardrails.
 
+For a narrative overview of the complete system and its diagrams, see [How Agent Rails Works](./how-agent-rails-works.en.md) or [Agent Rails 工作原理](./how-agent-rails-works.zh-CN.md).
+
 ## Scope
 
 ### First-Class OpenCode Adapter

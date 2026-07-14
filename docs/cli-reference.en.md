@@ -128,6 +128,8 @@ Local cards live under `~/.agent-rails/memory/<project>/`. Online memory is an o
 ## Related Design
 
 - [Agent Rails Context](../CONTEXT.md)
+- [How Agent Rails Works](./how-agent-rails-works.en.md)
+- [Agent Rails 工作原理](./how-agent-rails-works.zh-CN.md)
 - [Local Adapters And Release Safety](./local-adapters-and-release-safety.md)
 - [GitHub Release Distribution](./github-release-distribution.md)
 - [Development Milestones](./development-milestones.md)

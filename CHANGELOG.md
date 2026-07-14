@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added bilingual how-it-works documentation with diagrams for the system architecture, task lifecycle, Target Project and Profile isolation, Adapter ownership, shared Git Scope, and GitHub Release updates.
+
 ## 0.6.0 - 2026-07-14
 
 - Added versioned GitHub Release archives, SHA-256 assets, and a standalone installer that does not require a source checkout.

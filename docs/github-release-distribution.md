@@ -2,6 +2,8 @@
 
 Agent Rails is a multi-file shell kit, not a standalone binary. A Release therefore ships one complete kit archive instead of a wrapper that still depends on a source checkout.
 
+This document defines the Release-specific contract. For the complete runtime architecture and update flow, see [How Agent Rails Works](./how-agent-rails-works.en.md) or [Agent Rails 工作原理](./how-agent-rails-works.zh-CN.md).
+
 ## Distribution contract
 
 Every GitHub Release contains fixed asset names:

@@ -147,6 +147,8 @@ Daily use ends here. Updating, uninstalling, custom models, context budgets, Pro
 
 - [English CLI Reference](./docs/cli-reference.en.md)
 - [中文 CLI 参考](./docs/cli-reference.zh-CN.md)
+- [How Agent Rails Works (with architecture and flow diagrams)](./docs/how-agent-rails-works.en.md)
+- [Agent Rails 工作原理](./docs/how-agent-rails-works.zh-CN.md)
 - [Design and Safety Boundaries](./docs/local-adapters-and-release-safety.md)
 - [GitHub Release Distribution](./docs/github-release-distribution.md)
 - [Changelog](./CHANGELOG.md)

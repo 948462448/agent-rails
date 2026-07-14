@@ -25,6 +25,12 @@ Generated-file recognition, managed-skill inventory, tracked-path protection, ge
 
 Model aliases, canonical names, context and throughput limits, and Pack Mode token budgets live in one Model Preset Module. Task Pack generation and token estimation load the same preset data, while Doctor uses the same known-model Interface. `generic` remains a valid model name without numeric limits, and unknown names remain warning-only in Doctor so existing custom-model workflows stay compatible.
 
+### Progressive CLI Surface
+
+The default user journey is intentionally limited to `setup`, `run`, and `verify`. These are orchestration facades, not replacement domain implementations: Setup resolves Target Project Context and delegates to existing adapter installers and Doctors; Run keeps the existing Task Pack workflow; Verify delegates plan execution to Agent Check and optionally adds publish check. All lower-level commands remain compatible and are documented in the bilingual CLI reference.
+
+Automatic Setup proceeds only when exactly one supported coding-agent CLI is detected. Multiple detected tools require an explicit `--tool` selection, while `--tool all` records deliberate intent to install every supported personal integration. This avoids turning convenience into an unexpected user-level or project-local mutation.
+
 ### Target And Profile Boundaries
 
 - A profile is scoped to the source repository that produced it.
@@ -72,6 +78,7 @@ The implementation is covered by the repository test suite, including:
 - Task Pack failure behavior for non-file output destinations and the shared Git Scope Module Interface, including target-only snapshots that exclude working-tree changes.
 - The shared Model Preset Interface, including alias normalization, Pack Mode budgets, `generic`, unknown models, and reset behavior between loads.
 - The shared Target Project Context Interface, including nested Git paths, Profile-aware names, explicit worktree slugs, missing Profiles, and default Task Pack paths.
+- Setup tool selection and dry-run orchestration, plus Verify execution, preview, and publish composition.
 - Resolved, unresolved, and invalid publish-baseline cases, plus invalid-base rejection in `pack` and `check`.
 
 Run the release checks with:

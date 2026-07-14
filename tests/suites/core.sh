@@ -13,6 +13,19 @@ test_init_prints_shell_setup() {
   assert_contains "$output" 'ar doctor --project "$AGENT_RAILS_PROJECT" --profile "$AGENT_RAILS_PROFILE"'
 }
 
+test_init_without_project_stays_project_neutral() {
+  local output
+
+  output="$(AGENT_RAILS_PROJECT= AGENT_RAILS_PROFILE= "$AGENT_RAILS_BIN" init --shell zsh)"
+
+  assert_contains "$output" 'export PATH="$AGENT_RAILS_HOME/bin:$PATH"'
+  assert_not_contains "$output" 'export AGENT_RAILS_PROJECT='
+  assert_not_contains "$output" 'export AGENT_RAILS_PROFILE='
+  assert_contains "$output" 'cd /path/to/project'
+  assert_contains "$output" 'agent-rails setup --tool claude'
+  assert_contains "$output" 'agent-rails verify'
+}
+
 test_version_command_reads_version_file() {
   local output
 
@@ -115,8 +128,72 @@ test_codex_install_and_uninstall_dry_run() {
   assert_contains "$output" "codex plugin remove agent-rails@agent-rails-local"
 }
 
+test_setup_claude_dry_run_uses_local_adapter_and_doctor() {
+  local repo="$TMP_ROOT/setup-claude"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  output="$("$AGENT_RAILS_BIN" setup --project "$repo" --tool claude --dry-run)"
+
+  assert_contains "$output" "Agent Rails Setup"
+  assert_contains "$output" "Tool: claude"
+  assert_contains "$output" "Claude adapter ready"
+  assert_contains "$output" "Session Hook:"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN doctor --project"
+  assert_contains "$output" "Agent Rails setup complete."
+  assert_file_not_exists "$repo/.claude/AGENT_RAILS.md"
+}
+
+test_setup_auto_detects_single_tool() {
+  local repo="$TMP_ROOT/setup-auto-single"
+  local fake_bin="$TMP_ROOT/setup-auto-single-bin"
+  local output
+  mkdir -p "$repo" "$fake_bin"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/opencode"
+  chmod +x "$fake_bin/opencode"
+
+  output="$(PATH="$fake_bin:/usr/bin:/bin" "$AGENT_RAILS_BIN" setup --project "$repo" --dry-run)"
+
+  assert_contains "$output" "Detected tool: opencode"
+  assert_contains "$output" "Tool: opencode"
+  assert_contains "$output" "Agent Rails opencode Install"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN opencode doctor --project"
+}
+
+test_setup_auto_requires_choice_for_multiple_tools() {
+  local repo="$TMP_ROOT/setup-auto-multiple"
+  local fake_bin="$TMP_ROOT/setup-auto-multiple-bin"
+  local output
+  mkdir -p "$repo" "$fake_bin"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/claude"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/codex"
+  chmod +x "$fake_bin/claude" "$fake_bin/codex"
+
+  if output="$(PATH="$fake_bin:/usr/bin:/bin" "$AGENT_RAILS_BIN" setup --project "$repo" --dry-run 2>&1)"; then
+    printf 'Expected setup auto-detection to require an explicit choice.\n' >&2
+    return 1
+  fi
+
+  assert_contains "$output" "Multiple supported tools detected: claude, codex"
+  assert_contains "$output" "Choose one with --tool"
+  assert_contains "$output" "--tool all"
+}
+
 run_core_tests() {
   run_test test_init_prints_shell_setup "init prints shell setup"
+  run_test test_init_without_project_stays_project_neutral "init stays project-neutral by default"
   run_test test_version_command_reads_version_file "version command reads VERSION"
   run_test test_plugin_manifests_match_version_file "plugin manifests match VERSION"
   run_test test_changelog_contains_version_file "changelog contains VERSION"
@@ -124,4 +201,7 @@ run_core_tests() {
   run_test test_update_falls_back_from_missing_legacy_kit_profile "update falls back from missing legacy kit profile"
   run_test test_upgrade_self_alias_uses_update_flow "upgrade self alias uses update flow"
   run_test test_codex_install_and_uninstall_dry_run "codex install/uninstall dry-run"
+  run_test test_setup_claude_dry_run_uses_local_adapter_and_doctor "setup configures Claude and plans doctor"
+  run_test test_setup_auto_detects_single_tool "setup auto-detects one tool"
+  run_test test_setup_auto_requires_choice_for_multiple_tools "setup requires a choice for multiple tools"
 }

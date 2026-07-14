@@ -131,6 +131,61 @@ PROFILE
   fi
 }
 
+test_verify_runs_plan_and_can_preview() {
+  local repo="$TMP_ROOT/verify-run"
+  local output preview
+  mkdir -p "$repo/scripts"
+  git -C "$repo" init -q
+  printf '#!/usr/bin/env bash\nprintf "ok"\n' > "$repo/scripts/verify.sh"
+  git -C "$repo" add scripts/verify.sh
+  git_commit "$repo" init
+  printf '\nprintf "changed"\n' >> "$repo/scripts/verify.sh"
+
+  output="$("$AGENT_RAILS_BIN" verify --project "$repo")"
+  preview="$("$AGENT_RAILS_BIN" verify --project "$repo" --print-only)"
+
+  assert_contains "$output" "Agent Rails Verify"
+  assert_contains "$output" "Running suggested commands"
+  assert_contains "$output" ">>> shell entrypoints changed"
+  assert_contains "$output" "Agent Rails verification complete."
+  assert_contains "$preview" "Agent Rails Verify"
+  assert_contains "$preview" "bash -n scripts/verify.sh"
+  assert_not_contains "$preview" "Running suggested commands"
+}
+
+test_verify_publish_adds_release_check() {
+  local repo="$TMP_ROOT/verify-publish"
+  local base_sha output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  base_sha="$(git -C "$repo" rev-parse HEAD)"
+  printf '\nchanged\n' >> "$repo/README.md"
+
+  output="$({
+    "$AGENT_RAILS_BIN" verify \
+      --project "$repo" \
+      --publish \
+      --base "$base_sha" \
+      --print-only \
+      --no-secret-scan
+  })"
+
+  assert_contains "$output" "Agent Rails Verify"
+  assert_contains "$output" "Mode: publish"
+  assert_contains "$output" "Agent publish check"
+  assert_contains "$output" "Disabled by --no-secret-scan"
+  assert_contains "$output" "Agent Rails publish verification complete."
+
+  if output="$("$AGENT_RAILS_BIN" verify --project "$repo" --no-secret-scan 2>&1)"; then
+    printf 'Expected --no-secret-scan without --publish to fail.\n' >&2
+    return 1
+  fi
+  assert_contains "$output" "--no-secret-scan requires --publish"
+}
+
 test_publish_check_summarizes_scope_and_redacts_secrets() {
   local repo="$TMP_ROOT/publish-check"
   local output
@@ -673,6 +728,8 @@ run_workflow_tests() {
   run_test test_agent_check_suggestions_only_omits_repeated_scope "agent-check suggestions-only omits repeated scope"
   run_test test_agent_check_selects_changed_test_suites "agent-check selects changed test suites"
   run_test test_agent_check_run_uses_child_shell "agent-check --run uses child shell"
+  run_test test_verify_runs_plan_and_can_preview "verify runs or previews the verification plan"
+  run_test test_verify_publish_adds_release_check "verify --publish adds release checks"
   run_test test_publish_check_summarizes_scope_and_redacts_secrets "publish check summarizes scope and redacts secrets"
   run_test test_sensitive_output_module_redacts_supported_formats "sensitive output module redacts supported formats"
   run_test test_publish_check_requires_deployed_baseline_when_upstream_equals_target "publish check requires deployed baseline when upstream equals target"

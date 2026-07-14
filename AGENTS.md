@@ -15,6 +15,10 @@
 
 ```bash
 bin/agent-rails --version
+bin/agent-rails setup --project /path/to/project --tool claude --dry-run
+bin/agent-rails run --project /path/to/project "本次任务目标"
+bin/agent-rails verify --project /path/to/project
+bin/agent-rails verify --project /path/to/project --publish --base deployed-source-revision
 bin/agent-rails update --project /path/to/project --profile /path/to/profile --session-hook
 bin/agent-rails pack --project /path/to/project "本次任务目标"
 bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "本次任务目标"

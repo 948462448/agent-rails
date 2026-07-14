@@ -19,6 +19,7 @@ Agent Rails is a personal, repository-independent kit. It reads a target project
 - **Verification Plan**: The de-duplicated commands selected from changed paths. A full check report owns Git scope; integrations may consume only the Verification Plan.
 - **Git Scope**: The resolved target commit, optional base commit, merge base, and committed/worktree path snapshot used by Task Pack, Agent Check, and publish checks.
 - **Sensitive Output Guard**: The shared Module that detects supported secret-bearing assignments, headers, and private-key blocks, then applies the evidence policy required by each Adapter.
+- **User Journey Facade**: A small public command that composes existing Interfaces around one user goal without taking ownership of their domain rules. Setup, Run, and Verify form the default journey.
 - **Test Suite**: A domain-grouped set of regression tests loaded by the test runner. Suites share assertions and temporary-workspace setup but own their test cases and execution labels.
 
 ## Architectural boundaries
@@ -34,6 +35,7 @@ Agent Rails is a personal, repository-independent kit. It reads a target project
 - The shared Git Scope Module owns default-base policy, commit-ref validation, merge-base resolution, and committed/worktree path snapshots. Task Pack, Agent Check, and publish checks are Adapters at this Seam.
 - The shared Model Preset Module owns model alias normalization, known-model status, numeric limits, and Pack Mode budgets. Task Pack, Estimate, and Doctor are Adapters at this Seam and must not duplicate model tables.
 - The shared Target Project Context Module owns explicit-project canonicalization, Git-root discovery, Profile resolution/loading status, Profile-aware naming, worktree slug policy, and the derived Task Pack path. Command entrypoints retain their own user-facing failure and output policy.
+- Setup, Run, and Verify are User Journey Facades. Setup delegates adapter mutation and diagnosis to existing installers and Doctors; Verify delegates change selection and release scope to Agent Check and publish check. Facades must not duplicate Adapter Workspace, Git Scope, Sensitive Output Guard, or Verification Plan rules.
 - The SessionStart hook carries only stable routing and safety guardrails; task-specific evidence and the full execution contract belong in the on-demand Task Pack.
 - The test runner owns suite selection and global test setup; each Test Suite owns one coherent workflow area.
 - Shared modules must preserve the public CLI, existing adapter paths, and on-disk compatibility unless a migration is explicitly designed.

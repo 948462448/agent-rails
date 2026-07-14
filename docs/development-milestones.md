@@ -45,6 +45,9 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Extracted a shared Model Preset Module so `pack`, `estimate`, and `doctor` consume one model alias, limit, and Pack Mode budget contract.
 - Added a Target Project Context Module so command adapters share one project-root, Profile, worktree slug, and default Task Pack path contract.
 - Deepened the adapter lifecycle into a Managed Adapter Workspace Module so Claude and OpenCode share ownership, tracked-path, skill, write, and local-ignore mechanics while retaining tool-specific configuration behavior.
+- Added setup/run/verify as the default three-command user journey while retaining every lower-level command for compatibility and advanced use.
+- Reorganized the bilingual README and CLI reference around progressive disclosure instead of exposing implementation-oriented commands during onboarding.
+- Made the default shell bootstrap project-neutral and rewrote the bilingual README around installation, connection, normal conversation, visible activation, and common recovery paths.
 - Recorded the design, tradeoffs, verification, and follow-ups in [Local Adapters And Release Safety](./local-adapters-and-release-safety.md).
 
 ## Near-Term Backlog

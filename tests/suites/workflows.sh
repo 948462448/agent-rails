@@ -1,4 +1,4 @@
-# Check, publish, estimate, run, path, and eval workflow tests.
+# Check, publish, estimate, run, path, and standalone workflow-tool tests.
 
 test_agent_check_includes_bin_entrypoint() {
   local repo="$TMP_ROOT/check-bin"
@@ -707,36 +707,22 @@ test_init_paths_do_not_leak_default_config_home_to_children() {
   assert_not_contains "$path" "$parent_home/.agent-rails/agent-context/"
 }
 
-test_eval_init_record_report() {
-  local repo="$TMP_ROOT/eval-target"
-  local eval_dir="$TMP_ROOT/evals"
-  local home="$TMP_ROOT/home-eval-record"
-  local task_path="$eval_dir/tasks/sample-code-review.yaml"
-  local report_path="$eval_dir/report.md"
+test_standalone_tui_ab_eval() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'python3 is required for tools/ab_eval.py.\n' >&2
+    exit 1
+  fi
+  PYTHONPYCACHEPREFIX="$TMP_ROOT/ab-eval-pycache" python3 "$ROOT_DIR/tests/test_ab_eval.py"
+}
+
+test_agent_rails_cli_has_no_eval_command() {
   local output
-  local log_path
-  mkdir -p "$repo" "$home"
-  git -C "$repo" init -q
-  printf '# temp\n' > "$repo/README.md"
-  git -C "$repo" add README.md
-  git_commit "$repo" init
-  printf '\nchanged\n' >> "$repo/README.md"
-
-  output="$("$AGENT_RAILS_BIN" eval init --dir "$eval_dir")"
-  assert_contains "$output" "Initialized eval directory"
-  assert_file_contains "$task_path" "id: sample-code-review-001"
-
-  output="$(HOME="$home" "$AGENT_RAILS_BIN" eval record --task "$task_path" --project "$repo" --dir "$eval_dir" --mode agentrails --model glm5.1 --pack-mode normal --tokenizer char)"
-  assert_contains "$output" "Recorded eval run"
-  log_path="$(printf '%s\n' "$output" | sed -n -E 's/^Recorded eval run: //p' | sed -n '1p')"
-  assert_file_contains "$log_path" '"event":"run_started"'
-  assert_file_contains "$log_path" '"event":"command_finished"'
-  assert_file_contains "$log_path" '"event":"run_finished"'
-
-  output="$("$AGENT_RAILS_BIN" eval report --runs "$eval_dir/runs" --output "$report_path")"
-  assert_contains "$output" "Wrote"
-  assert_file_contains "$report_path" "sample-code-review-001"
-  assert_file_contains "$report_path" "agentrails"
+  output="$("$AGENT_RAILS_BIN" --help)"
+  assert_not_contains "$output" "agent-rails eval"
+  if "$AGENT_RAILS_BIN" eval >/dev/null 2>&1; then
+    printf 'Expected the removed eval command to fail.\n' >&2
+    exit 1
+  fi
 }
 
 run_workflow_tests() {
@@ -762,5 +748,6 @@ run_workflow_tests() {
   run_test test_run_infers_lite_for_poc_goal "run infers lite for poc goal"
   run_test test_pack_defaults_to_worktree_specific_path "pack defaults to worktree-specific path"
   run_test test_init_paths_do_not_leak_default_config_home_to_children "init paths do not leak default config home to children"
-  run_test test_eval_init_record_report "eval init record report"
+  run_test test_standalone_tui_ab_eval "standalone TUI A/B eval"
+  run_test test_agent_rails_cli_has_no_eval_command "agent-rails CLI has no eval command"
 }

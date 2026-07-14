@@ -39,7 +39,6 @@ Advanced:
   agent-rails check [--project PATH] [agent-check args...]
   agent-rails publish check [--project PATH] [--profile PATH] [--base REF] [--target-ref REF] [--no-secret-scan]
   agent-rails estimate [--profile PATH] [--model NAME] [--tokenizer auto|char|tiktoken|command] [--file PATH] [text...]
-  agent-rails eval init|record|report [eval args...]
   agent-rails doctor [--project PATH] [--profile PATH] [--openmemory-smoke]
   agent-rails profile init [--project PATH] [--name NAME] [--scope user|project] [--print-only]
   agent-rails claude install [--project PATH] [--profile PATH] [--mode local|project] [--global-reminder] [--session-hook]
@@ -160,22 +159,6 @@ case "$command" in
     ;;
   estimate)
     "$AGENT_RAILS_HOME/scripts/agent-estimate.sh" "$@"
-    ;;
-  eval)
-    subcommand="${1:-}"
-    case "$subcommand" in
-      ""|--help|-h)
-        "$AGENT_RAILS_HOME/scripts/agent-eval.sh" --help
-        ;;
-      init|record|report)
-        shift
-        "$AGENT_RAILS_HOME/scripts/agent-eval.sh" "$subcommand" "$@"
-        ;;
-      *)
-        usage >&2
-        exit 2
-        ;;
-    esac
     ;;
   doctor)
     "$AGENT_RAILS_HOME/scripts/agent-doctor.sh" "$@"

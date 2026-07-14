@@ -33,24 +33,35 @@ quality/safety/token Pareto comparison:
 - Does a higher Pack Mode provide enough marginal value to justify its added
   context?
 
-## Why The Current Eval Is Not Yet This Experiment
+## Why Evaluation Lives Outside Agent Rails
 
-The existing `agent-rails eval` command is a useful run logger, but it is not
-yet a causal Agent Rails evaluation harness:
+Evaluation is evidence about Agent Rails, not an Agent Rails runtime
+capability. The product CLI should remain focused on context generation,
+injection, adapters, and deterministic checks. A standalone harness owns the
+experimental treatments, captured TUI artifacts, judge integration, and
+paired reports.
 
-- `eval record --mode baseline` still invokes `agent-rails run` and
-  `agent-rails check`; `mode` currently changes the recorded label, not the
-  treatment.
-- A successful run currently means that Task Pack generation and Agent Check
-  completed, not that an agent solved the task.
-- Tokenizer output estimates Task Pack size; it does not record the complete
-  provider-reported input, cached input, reasoning, or output usage of the
-  coding-agent run.
-- The report lists logs and exit codes but does not calculate paired quality or
-  token deltas.
+The former built-in run logger was removed because a baseline label did not
+create a true baseline: it still invoked Agent Rails surfaces, treated command
+completion as task success, and measured Task Pack estimates instead of full
+provider usage. Keeping that behavior in the product CLI made the boundary
+look stronger than the evidence.
 
-Fixing the true baseline is the first implementation milestone. A larger task
+Fixing the true baseline remains the first evaluation milestone. A larger task
 set is premature until `off` can bypass every Agent Rails surface.
+
+## TUI Black-Box Execution
+
+The harness does not need to automate the development TUI. Run the same task
+manually in two isolated worktrees and fresh TUI sessions, then capture the
+patch, final response, verification output, and optional provider usage. A
+standalone Python tool can anonymize those artifacts and invoke any trusted LLM
+judge command over stdin.
+
+The default blind comparison uses two mirrored rounds: the second round swaps
+Response A and Response B. A winner is position-consistent only when both
+rounds map back to the same treatment. See
+[the Chinese TUI A/B runbook](./tui-ab-eval.zh-CN.md) for the runnable flow.
 
 ## Evaluation Questions
 
@@ -347,16 +358,17 @@ the highest successful mode.
 
 ### M1: True Baseline And Run Manifest
 
-- Replace the free-form `mode` label with an explicit treatment contract while
-  retaining backward-compatible labels in stored output.
-- Add a baseline runner that invokes the underlying coding agent directly.
+- Define explicit treatment contracts in a standalone run manifest.
+- Capture completed black-box TUI runs without routing the `off` arm through
+  Agent Rails.
 - Record repository SHA, dirty-state policy, model/harness versions, treatment,
   Pack Mode, repetition, injected artifacts, and environment fingerprint.
 - Make baseline contamination a hard harness failure.
 
-### M2: Execute And Score Tasks
+### M2: Capture And Score Tasks
 
-- Add an agent-runner interface instead of stopping after `agent-rails run`.
+- Capture the final patch, final response, verification output, and optional
+  usage from each TUI run.
 - Restore a clean task environment for every experimental unit.
 - Execute acceptance and scope checks after the agent exits.
 - Distinguish setup failure, agent failure, and scored task failure.
@@ -385,7 +397,7 @@ the highest successful mode.
 
 - Declaring one Pack Mode universally best.
 - Optimizing only Task Pack size while ignoring full-session tokens.
-- Treating `eval record` command success as task success.
+- Treating TUI or capture-command success as task success.
 - Using an LLM judge as the only correctness oracle when executable acceptance
   is possible.
 - Training or tuning on the held-out evaluation tasks.
@@ -394,13 +406,14 @@ the highest successful mode.
 
 ## First Implementation Slice
 
-The first code change following this document should be deliberately small:
+The first implementation slice should be deliberately small:
 
-1. introduce a true `off` treatment that cannot call Agent Rails;
-2. run one underlying agent command for `off` and one for forced `lite`;
-3. execute one acceptance command;
-4. store actual usage when the runner exposes it;
-5. render one paired row containing success and token delta.
+1. run the same task in isolated `off` and forced-`lite` TUI sessions;
+2. capture both patches, final responses, and verification outputs with the
+   standalone Python tool;
+3. execute one deterministic acceptance command;
+4. store actual usage when the TUI or provider exposes it;
+5. run a mirrored blind judge and reveal one paired result with token delta.
 
-Until that slice works end to end, adding more benchmark tasks or automatic
-judges increases volume without answering the primary causal question.
+Until that slice works end to end, adding more benchmark tasks increases
+volume without answering the primary causal question.

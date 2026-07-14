@@ -15,6 +15,8 @@
 - Added `agent-rails setup` and `agent-rails verify` as compatible user-journey facades over the existing adapter, Doctor, Agent Check, and publish-check commands.
 - Reduced the bilingual README path to setup, run, and verify, moving customization and troubleshooting details into bilingual CLI reference documents.
 - Made plain `agent-rails init` project-neutral so first-time shell setup no longer pins one repository or prints the advanced workflow; explicit `--project` and `--profile` remain compatible.
+- Removed the built-in `agent-rails eval` logger and `agent-eval` skill so the product CLI stays focused on Agent Rails runtime capabilities; TUI A/B experiments now use a standalone, dependency-free Python capture and blind-judge tool.
+- Stopped Agent Check from adding deleted shell entrypoints to generated `bash -n` verification commands.
 - Added `agent-rails opencode install`, `agent-rails opencode doctor`, and `agent-rails opencode uninstall` for a project-local opencode adapter backed by `.opencode/` instructions, commands, and skills.
 - Scoped SessionStart profiles to their source repository, with explicit worktree and sibling-repository guidance.
 - Added sensitive-output rules to SessionStart and Task Packs, and restricted new Task Packs to owner-only file permissions.

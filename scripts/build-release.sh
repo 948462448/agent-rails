@@ -81,6 +81,7 @@ done < "$file_list"
 archive_path="$output_dir/agent-rails.tar.gz"
 checksum_path="$archive_path.sha256"
 installer_path="$output_dir/install.sh"
+archive_listing="$tmp_dir/archive.list"
 
 tar -czf "$archive_path" -C "$tmp_dir" "agent-rails-$version"
 cp -p "$source_root/scripts/agent-release-install.sh" "$installer_path"
@@ -93,7 +94,11 @@ else
 fi
 printf '%s  %s\n' "$checksum" "$(basename "$archive_path")" > "$checksum_path"
 
-if ! tar -tzf "$archive_path" | grep -Fqx "agent-rails-$version/bin/agent-rails"; then
+if ! tar -tzf "$archive_path" > "$archive_listing"; then
+  printf 'Built archive could not be inspected.\n' >&2
+  exit 1
+fi
+if ! grep -Fqx "agent-rails-$version/bin/agent-rails" "$archive_listing"; then
   printf 'Built archive does not contain the Agent Rails CLI.\n' >&2
   exit 1
 fi

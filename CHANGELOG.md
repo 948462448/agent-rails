@@ -2,11 +2,11 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-07-15
+
 - Added bilingual how-it-works documentation with diagrams for the system architecture, task lifecycle, Target Project and Profile isolation, Adapter ownership, shared Git Scope, and GitHub Release updates.
-
-## 0.6.0 - 2026-07-14
-
 - Added versioned GitHub Release archives, SHA-256 assets, and a standalone installer that does not require a source checkout.
+- Made release archive inspection portable across BSD and GNU tar by avoiding an early-closing `grep -q` pipeline under `pipefail`.
 - Made `agent-rails upgrade self` project-neutral and able to update Release installations through an atomic `current` symlink switch while preserving Git-checkout updates.
 - Added a tag-driven GitHub Actions workflow that validates `v<VERSION>`, runs the full test suite, builds release assets, and publishes them through GitHub CLI.
 - Added `agent-rails setup` and `agent-rails verify` as compatible user-journey facades over the existing adapter, Doctor, Agent Check, and publish-check commands.

@@ -134,6 +134,40 @@ test_release_build_creates_installable_assets() {
   fi
 }
 
+test_release_build_handles_tar_sigpipe_behavior() {
+  local fake_bin="$TMP_ROOT/release-tar-sigpipe-bin"
+  local output_dir="$TMP_ROOT/release-tar-sigpipe-dist"
+  local real_tar
+  real_tar="$(command -v tar)"
+  mkdir -p "$fake_bin"
+
+  cat > "$fake_bin/tar" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-tzf" ]]; then
+  printf 'agent-rails-%s/bin/agent-rails\n' "$AGENT_RAILS_TEST_VERSION"
+  for (( index = 0; index < 10000; index++ )); do
+    printf 'agent-rails-%s/test-entry-%s\n' "$AGENT_RAILS_TEST_VERSION" "$index"
+  done
+  exit 0
+fi
+
+exec "$AGENT_RAILS_TEST_REAL_TAR" "$@"
+SH
+  chmod +x "$fake_bin/tar"
+
+  if ! AGENT_RAILS_TEST_REAL_TAR="$real_tar" \
+    AGENT_RAILS_TEST_VERSION="$EXPECTED_AGENT_RAILS_VERSION" \
+    PATH="$fake_bin:$PATH" \
+    bash "$ROOT_DIR/scripts/build-release.sh" --output "$output_dir" --include-worktree >/dev/null; then
+    printf 'Expected release build verification to tolerate tar SIGPIPE behavior.\n' >&2
+    return 1
+  fi
+
+  assert_file_exists "$output_dir/agent-rails.tar.gz"
+}
+
 test_release_installer_supports_non_git_self_upgrade() {
   local install_root="$TMP_ROOT/release-install"
   local bin_dir="$TMP_ROOT/release-bin"
@@ -341,6 +375,7 @@ run_core_tests() {
   run_test test_update_falls_back_from_missing_legacy_kit_profile "update falls back from missing legacy kit profile"
   run_test test_upgrade_self_only_skips_project_refresh "upgrade self skips project refresh"
   run_test test_release_build_creates_installable_assets "release build creates installable assets"
+  run_test test_release_build_handles_tar_sigpipe_behavior "release build handles tar SIGPIPE behavior"
   run_test test_release_installer_supports_non_git_self_upgrade "release install supports non-git self-upgrade"
   run_test test_release_self_upgrade_switches_to_new_version "release self-upgrade switches versions"
   run_test test_release_installer_rejects_checksum_mismatch "release installer rejects checksum mismatch"

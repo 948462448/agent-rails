@@ -188,7 +188,7 @@ render_opencode_plugin() {
     plugin_profile=""
   fi
 
-  python3 - \
+  python3 -E - \
     "$plugin_template_path" \
     "$AGENT_RAILS_VERSION" \
     "$plugin_bin" \
@@ -279,7 +279,7 @@ merge_opencode_config() {
 
   require_python_for_config
   mkdir -p "$(dirname "$opencode_config_path")"
-  python3 - \
+  python3 -E - \
     "$opencode_config_path" \
     "$plugin_path" \
     "$legacy_opencode_instruction_path" \
@@ -349,7 +349,7 @@ remove_opencode_config_plugin() {
   fi
 
   require_python_for_config
-  python3 - \
+  python3 -E - \
     "$opencode_config_path" \
     "$plugin_path" \
     "$legacy_opencode_instruction_path" \

@@ -139,7 +139,15 @@ The `publish check` base should be the source revision currently deployed. An up
 
 ## Memory and Sensitive Output
 
-Local cards live under `~/.agent-rails/memory/<project>/`. Online memory is an optional read provider; this kit does not write to OpenMemory. Access keys, cookies, and tokens must not enter the repository. Base64 and URL encoding are not redaction.
+Local cards live under `~/.agent-rails/memory/<project>/` and are the only memory this kit writes explicitly. Online memory is connected through an optional external read-only Adapter:
+
+```bash
+MEMORY_PROVIDER=hybrid
+AGENT_RAILS_ONLINE_MEMORY_CMD='/path/to/read-only-memory-adapter'
+AGENT_RAILS_ONLINE_MEMORY_TIMEOUT_SECONDS=8
+```
+
+The Adapter reads query context from `AGENT_RAILS_MEMORY_QUERY_FILE`, `AGENT_RAILS_MEMORY_PROJECT`, and `AGENT_RAILS_MEMORY_LIMIT`, then writes UTF-8 Markdown to stdout. One invocation must remain a bounded process tree; daemonizing or leaving the process group is unsupported. The host enforces a total deadline, a streaming 1 MB output cap, sensitive-output redaction, and an untrusted-data envelope around returned Markdown. The Adapter runtime owns credentials, network protocols, and provider details; none may enter a Profile, Task Pack, or repository. Base64 and URL encoding are not redaction. Use `doctor --online-memory-smoke` to test this read-only path explicitly.
 
 ## Related Design
 

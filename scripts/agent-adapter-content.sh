@@ -129,7 +129,7 @@ project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 $_agent_adapter_content_bin memory suggest --project "\$project_root"$profile_arg --decision keep --write-local --title "<short title>" --trigger "<trigger>" --applies-to "<scope>" --verify "<check>" --caution "<scope limits>" "<brief reusable lesson>"
 \`\`\`
 
-Do not write OpenMemory from this kit. Online memory is a read provider unless a separate integration is explicitly added.
+This kit writes only curated local memory. Treat the external online memory Adapter as read-only; its credentials and provider protocol stay outside Agent Rails.
 EOF
 }
 

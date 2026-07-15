@@ -5,10 +5,10 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails doctor [--project PATH] [--profile PATH] [--openmemory-smoke] [--fix] [--mode local|project] [--session-hook] [--global-reminder] [--dry-run]
+Usage: agent-rails doctor [--project PATH] [--profile PATH] [--online-memory-smoke] [--fix] [--mode local|project] [--session-hook] [--global-reminder] [--dry-run]
 
 Checks project/profile wiring, Claude adapter files, local ignore status, skills,
-model presets, OpenMemory readiness, optional OpenMemory read smoke, and required command-line tools.
+model presets, optional online memory readiness, and required command-line tools.
 
 --fix refreshes the Claude adapter and bundled skills for the target project.
 USAGE
@@ -16,19 +16,48 @@ USAGE
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
+agent_rails_kit_home="$AGENT_RAILS_HOME"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
-# shellcheck source=scripts/agent-target-project.sh
-source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
 # shellcheck source=scripts/agent-model-presets.sh
 source "$AGENT_RAILS_HOME/scripts/agent-model-presets.sh"
 agent_rails_init_paths
 AGENT_RAILS_VERSION="$(agent_rails_version)"
 
+resolve_target_project_context() {
+  [[ "$#" -eq 6 ]] || return 2
+  local requested_project="$1"
+  local requested_profile="$2"
+  local config_home="$3"
+  local project_name="$4"
+  local worktree_slug_preset="$5"
+  local task_pack_path="$6"
+  local target_context_assignments
+  local target_context_args=(
+    --project "$requested_project"
+    --agent-rails-home "$agent_rails_kit_home"
+    --skip-profile-load
+    --shell
+  )
+  if [[ -n "$requested_profile" ]]; then
+    target_context_args+=(--profile "$requested_profile")
+  fi
+  target_context_assignments="$({
+    AGENT_RAILS_CONFIG_HOME="$config_home" \
+    PROJECT_NAME="$project_name" \
+    PROJECT_WORKTREE_SLUG="$worktree_slug_preset" \
+    TASK_PACK_PATH="$task_pack_path" \
+    PYTHONDONTWRITEBYTECODE=1 \
+      python3 -E "$agent_rails_kit_home/scripts/agent-python-cli.py" \
+        target-context "${target_context_args[@]}"
+  })" || return $?
+  eval "$target_context_assignments"
+}
+
 project="$PWD"
 profile_path=""
-openmemory_smoke=0
+online_memory_smoke=0
 fix=0
 fix_mode="local"
 fix_session_hook=0
@@ -49,8 +78,8 @@ while [[ $# -gt 0 ]]; do
       profile_path="$2"
       shift 2
       ;;
-    --openmemory-smoke)
-      openmemory_smoke=1
+    --online-memory-smoke)
+      online_memory_smoke=1
       shift
       ;;
     --fix)
@@ -160,99 +189,46 @@ read_adapter_version() {
   done | awk 'NF { print; exit }'
 }
 
-provider_uses_openmemory() {
+provider_uses_online_memory() {
   case "${MEMORY_PROVIDER:-local}" in
-    openmemory|hybrid) return 0 ;;
+    online|hybrid) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-sanitize_openmemory_message() {
-  sed -E \
-    -e 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/<ip>/g' \
-    -e 's/[[:space:]]+/ /g' \
-    -e 's/^ //' \
-    -e 's/ $//' \
-    | cut -c 1-220
-}
-
-run_openmemory_smoke() {
-  if ! provider_uses_openmemory; then
-    warn "OpenMemory smoke requested but MEMORY_PROVIDER is not openmemory/hybrid."
+run_online_memory_smoke() {
+  if ! provider_uses_online_memory; then
+    warn "Online memory smoke requested but MEMORY_PROVIDER is not online/hybrid."
     return 0
   fi
 
-  if [[ -z "$OPENMEMORY_BASE_URL" || -z "$OPENMEMORY_MEMORY" || -z "$OPENMEMORY_TABLE" ]]; then
-    warn "OpenMemory smoke skipped because base URL, memory, or table is missing."
-    return 0
-  fi
-  if [[ -z "${!OPENMEMORY_TOKEN_ENV-}" ]]; then
-    warn "OpenMemory smoke skipped because token env is missing: $OPENMEMORY_TOKEN_ENV"
-    return 0
-  fi
-  if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
-    warn "OpenMemory smoke skipped because curl and jq are required."
+  if [[ -z "${AGENT_RAILS_ONLINE_MEMORY_CMD:-}" ]]; then
     return 0
   fi
 
-  local tmp_dir request_file response_file error_file base_url token http_code api_code count
+  local tmp_dir query_file output_file timeout_seconds
   tmp_dir="$(mktemp -d)"
-  request_file="$tmp_dir/openmemory-smoke-request.json"
-  response_file="$tmp_dir/openmemory-smoke-response.json"
-  error_file="$tmp_dir/openmemory-smoke.err"
-  trap 'rm -rf "$tmp_dir"; trap - RETURN' RETURN
-
-  jq -n \
-    --arg memory "$OPENMEMORY_MEMORY" \
-    --arg table "$OPENMEMORY_TABLE" \
-    --arg project_filter "${OPENMEMORY_PROJECT_FILTER:-}" \
-    --arg user_id "${OPENMEMORY_USER_ID:-agent-rails}" \
-    --arg session_id "${OPENMEMORY_SESSION_ID:-}" \
-    '({
-      memory: $memory,
-      table: $table,
-      limit: 1,
-      field_selector: {
-        attributes: {
-          mode: "include",
-          include: ["card_id", "project", "title", "updated_at"]
-        }
-      }
-    }
-    + (if $user_id == "" then {} else {user_id: $user_id} end)
-    + (if $session_id == "" then {} else {session_id: $session_id} end)
-    + (if $project_filter == "" then {} else {filters: {project: $project_filter}} end))' > "$request_file"
-
-  if [[ "${OPENMEMORY_DRY_RUN_REQUEST:-0}" == "1" ]]; then
-    OPENMEMORY_REQUEST_DUMP_PATH="${OPENMEMORY_REQUEST_DUMP_PATH:-$AGENT_RAILS_CONFIG_HOME/agent-context/openmemory-doctor-smoke.json}"
-    mkdir -p "$(dirname "$OPENMEMORY_REQUEST_DUMP_PATH")"
-    cp "$request_file" "$OPENMEMORY_REQUEST_DUMP_PATH"
-    ok "OpenMemory smoke dry-run request written: $OPENMEMORY_REQUEST_DUMP_PATH"
-    return 0
+  query_file="$tmp_dir/query.md"
+  output_file="$tmp_dir/output.md"
+  printf 'Agent Rails Doctor online memory smoke.\n' > "$query_file"
+  timeout_seconds="${AGENT_RAILS_ONLINE_MEMORY_TIMEOUT_SECONDS:-8}"
+  if ! [[ "$timeout_seconds" =~ ^[0-9]+$ && "$timeout_seconds" -gt 0 ]]; then
+    timeout_seconds=8
   fi
 
-  base_url="${OPENMEMORY_BASE_URL%/}"
-  token="${!OPENMEMORY_TOKEN_ENV-}"
-  http_code="$(curl -sS -o "$response_file" -w '%{http_code}' \
-    --max-time "${OPENMEMORY_TIMEOUT_SECONDS:-8}" \
-    -X POST "$base_url/agent-memory/v1/memories/collection/list" \
-    -H "Authorization: Bearer $token" \
-    -H "Content-Type: application/json; charset=utf-8" \
-    --data @"$request_file" 2>"$error_file" || true)"
-
-  if [[ ! "$http_code" =~ ^2 ]]; then
-    warn "OpenMemory smoke failed: HTTP ${http_code:-unknown}. $(sanitize_openmemory_message < "$error_file")"
-    return 0
+  if PYTHONDONTWRITEBYTECODE=1 \
+    python3 -E "$AGENT_RAILS_HOME/scripts/agent-python-cli.py" online-memory \
+      --command "$AGENT_RAILS_ONLINE_MEMORY_CMD" \
+      --query-file "$query_file" \
+      --project "$PROJECT_NAME" \
+      --limit 1 \
+      --timeout-seconds "$timeout_seconds" \
+      --output "$output_file" >/dev/null 2>&1; then
+    ok "Online memory smoke read OK."
+  else
+    warn "Online memory smoke failed; adapter diagnostics were suppressed."
   fi
-
-  api_code="$(jq -r '.code // empty' "$response_file" 2>/dev/null || true)"
-  if [[ "$api_code" != "OK" ]]; then
-    warn "OpenMemory smoke failed: code=${api_code:-unknown} message=$(jq -r '.message // ""' "$response_file" 2>/dev/null | sanitize_openmemory_message)"
-    return 0
-  fi
-
-  count="$(jq -r '.data.memories // [] | length' "$response_file" 2>/dev/null || printf '0')"
-  ok "OpenMemory smoke read OK: $count record(s) visible from $OPENMEMORY_TABLE"
+  rm -rf "$tmp_dir"
 }
 
 printf 'Agent Rails Doctor\n\n'
@@ -276,10 +252,17 @@ if [[ ! -d "$project" ]]; then
   exit 1
 fi
 
-agent_target_project_resolve "$project" "$profile_path" || exit $?
+resolve_target_project_context \
+  "$project" \
+  "$profile_path" \
+  "$AGENT_RAILS_CONFIG_HOME" \
+  "${PROJECT_NAME:-}" \
+  "${PROJECT_WORKTREE_SLUG:-}" \
+  "${TASK_PACK_PATH:-}" || exit $?
 project_abs="$AGENT_TARGET_PROJECT_ROOT"
 profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
 is_git_repo="$AGENT_TARGET_PROJECT_IS_GIT_REPO"
+PROJECT_WORKTREE_SLUG_PRESET="$AGENT_TARGET_PROJECT_WORKTREE_SLUG_PRESET"
 ok "Project: $project_abs"
 
 if [[ "$is_git_repo" -eq 1 ]]; then
@@ -295,7 +278,8 @@ else
 fi
 
 if [[ -f "$profile_path" ]]; then
-  if ! agent_target_project_load_profile; then
+  # shellcheck source=/dev/null
+  if ! source "$profile_path"; then
     fail "Profile could not be sourced: $profile_path"
   fi
 fi
@@ -315,7 +299,17 @@ else
   info "No Agent Rails env file configured."
 fi
 
-agent_target_project_finalize
+PROJECT_NAME="${PROJECT_NAME:-$AGENT_TARGET_PROJECT_DEFAULT_NAME}"
+resolve_target_project_context \
+  "$project_abs" \
+  "$profile_path" \
+  "$AGENT_RAILS_CONFIG_HOME" \
+  "$PROJECT_NAME" \
+  "$PROJECT_WORKTREE_SLUG_PRESET" \
+  "${TASK_PACK_PATH:-}" || exit $?
+project_abs="$AGENT_TARGET_PROJECT_ROOT"
+profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
+is_git_repo="$AGENT_TARGET_PROJECT_IS_GIT_REPO"
 TASK_PACK_PATH="$AGENT_TARGET_PROJECT_TASK_PACK_PATH"
 MEMORY_PROVIDER="${MEMORY_PROVIDER:-local}"
 AGENT_RAILS_MODEL="${AGENT_RAILS_MODEL:-generic}"
@@ -342,44 +336,26 @@ printf '\nTools\n'
 command_status git
 command_status awk
 command_status sed
-if provider_uses_openmemory; then
-  command_status curl
-  command_status jq
-fi
 
 printf '\nPlugin Manifests\n'
 check_manifest_version "Codex plugin" "$AGENT_RAILS_HOME/.codex-plugin/plugin.json"
 check_manifest_version "Claude plugin" "$AGENT_RAILS_HOME/.claude-plugin/plugin.json"
 check_manifest_version "Codex marketplace plugin" "$AGENT_RAILS_HOME/codex-marketplace/plugins/agent-rails/.codex-plugin/plugin.json"
 
-printf '\nOpenMemory\n'
-if provider_uses_openmemory; then
-  ok "Memory provider: $MEMORY_PROVIDER"
-  OPENMEMORY_BASE_URL="${OPENMEMORY_BASE_URL:-}"
-  OPENMEMORY_MEMORY="${OPENMEMORY_MEMORY:-}"
-  OPENMEMORY_INSTANCE="${OPENMEMORY_INSTANCE:-agent_rails_memory_card}"
-  OPENMEMORY_TABLE="${OPENMEMORY_TABLE:-}"
-  OPENMEMORY_TOKEN_ENV="${OPENMEMORY_TOKEN_ENV:-OPENMEMORY_ACCESS_KEY}"
-  OPENMEMORY_DRY_RUN_REQUEST="${OPENMEMORY_DRY_RUN_REQUEST:-0}"
-    OPENMEMORY_REQUEST_DUMP_PATH="${OPENMEMORY_REQUEST_DUMP_PATH:-$AGENT_RAILS_CONFIG_HOME/agent-context/openmemory-doctor-smoke.json}"
-  if [[ -z "$OPENMEMORY_TABLE" && -n "$OPENMEMORY_MEMORY" && -n "$OPENMEMORY_INSTANCE" ]]; then
-    OPENMEMORY_TABLE="${OPENMEMORY_MEMORY}.${OPENMEMORY_INSTANCE}"
-  fi
-  [[ -n "$OPENMEMORY_BASE_URL" ]] && ok "OpenMemory base URL configured." || warn "OPENMEMORY_BASE_URL is not set."
-  [[ -n "$OPENMEMORY_MEMORY" ]] && ok "OpenMemory memory configured: $OPENMEMORY_MEMORY" || warn "OPENMEMORY_MEMORY is not set."
-  [[ -n "$OPENMEMORY_TABLE" ]] && ok "OpenMemory table configured: $OPENMEMORY_TABLE" || warn "OPENMEMORY_TABLE/OPENMEMORY_INSTANCE is not set."
-  if [[ -n "${!OPENMEMORY_TOKEN_ENV-}" ]]; then
-    ok "OpenMemory token env is set: $OPENMEMORY_TOKEN_ENV"
+printf '\nMemory\n'
+ok "Memory provider: $MEMORY_PROVIDER"
+if provider_uses_online_memory; then
+  AGENT_RAILS_ONLINE_MEMORY_CMD="${AGENT_RAILS_ONLINE_MEMORY_CMD:-}"
+  if [[ -n "$AGENT_RAILS_ONLINE_MEMORY_CMD" ]]; then
+    ok "Online memory command configured."
   else
-    warn "OpenMemory token env is missing: $OPENMEMORY_TOKEN_ENV"
+    warn "AGENT_RAILS_ONLINE_MEMORY_CMD is not configured."
   fi
-else
-  ok "Memory provider: $MEMORY_PROVIDER"
 fi
-if [[ "$openmemory_smoke" -eq 1 ]]; then
-  run_openmemory_smoke
-else
-  info "OpenMemory smoke not requested; pass --openmemory-smoke to test the read path."
+if [[ "$online_memory_smoke" -eq 1 ]]; then
+  run_online_memory_smoke
+elif provider_uses_online_memory; then
+  info "Online memory smoke not requested; pass --online-memory-smoke to test the read path."
 fi
 
 printf '\nClaude Adapter\n'

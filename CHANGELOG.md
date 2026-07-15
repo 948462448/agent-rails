@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Started the Shell-to-Python migration with a standard-library `src/agent_rails` package: `agent-rails estimate` now runs through Python Model Preset, Tokenizer, and rendering Modules while its Compatibility Shell only loads the existing Profile and forwards arguments.
+- Reused the Python Tokenizer Interface from the Context Budget Assembler, added direct Python unit coverage for tokenizer failover/cache behavior, and preserved the estimate CLI's profile, input, output, and error contracts through black-box tests.
+- Added Python Paths, Shell Profile Adapter, and Target Project Context Modules, then moved `agent-rails run` and Task Pack root/path resolution onto them while preserving Git-root discovery, Profile precedence, POSIX worktree slugs, environment-file overlays, lexical config paths, and child `HOME` isolation.
+- Made the Python Model Preset registry the single data source; the remaining Shell consumers now use a Compatibility Shell that loads fixed, safely quoted fields from Python instead of maintaining a second model table.
+- Removed the vendor-specific HTTP, credential, table, and response-parsing implementation from Task Pack, replacing it with a provider-neutral Python Online Memory Interface whose external command Adapter owns credentials and protocol, returns UTF-8 Markdown, and fails back to local memory without blocking Pack generation.
+- Added an absolute Trusted Python Bootstrap so Target Projects cannot shadow the `agent_rails` package, and hardened online Adapter execution with streaming output limits, whole-process-group deadlines, suppressed diagnostics, and an untrusted-data Markdown envelope.
+- Moved Doctor's Target Project resolution and final path derivation onto the Python Target Project Context Module while keeping Profile/env execution, diagnostics, system probes, and `--fix` policy in the Compatibility Shell; added regressions for single execution and the missing-Profile exit contract.
+- Replaced the 251-line Shell `profile init` implementation with a Python Module for canonical Target Project resolution, structured verification-command detection, safely escaped rendering, and atomic `0600` writes; project-scoped writes use no-follow directory handles, inherited repo-local `GIT_*` variables cannot redirect root discovery, and the remaining Shell file is only a trusted bootstrap wrapper.
+
 ## 0.6.1 - 2026-07-15
 
 - Added hard token-budget Task Pack assembly with required-section floors, weighted category allocation, unused-share redistribution, exact external/Hugging Face tokenizer support, and a cached long-lived counting service.

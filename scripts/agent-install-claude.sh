@@ -362,7 +362,7 @@ write_session_hook_settings() {
 
   local args=(install --settings "$claude_settings_path" --hook "$session_hook_path")
   [[ "$dry_run" -eq 1 ]] && args+=(--dry-run)
-  python3 "$session_hook_settings_script" "${args[@]}"
+  python3 -E "$session_hook_settings_script" "${args[@]}"
 }
 
 adapter_content_bin="$AGENT_RAILS_BIN"

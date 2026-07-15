@@ -161,7 +161,7 @@ agent-rails update --tool opencode
 
 ## 需要更多控制
 
-日常使用到这里就够了。更新、卸载、自定义模型、上下文预算、Profile、OpenMemory 和各工具的完整命令放在参考文档中：
+日常使用到这里就够了。更新、卸载、自定义模型、上下文预算、Profile、在线 memory Adapter 和各工具的完整命令放在参考文档中：
 
 - [中文 CLI 参考](./docs/cli-reference.zh-CN.md)
 - [English CLI Reference](./docs/cli-reference.en.md)

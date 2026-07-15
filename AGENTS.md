@@ -9,7 +9,7 @@
 - base64/URL 编码不是脱敏；读取日志、DOM、Job 表格时只取决策需要的字段，不展开 auth-bearing context。
 - 用户级配置放在 `~/.agent-rails/`；项目级配置只放目标项目的 `.agent-rails/`，不要放进本 kit 的运行目录。
 - SessionStart 注入的 profile 只属于来源仓库；同仓 worktree 要传准确根目录，sibling/不同仓库必须重新解析 profile。
-- OpenMemory 写入、修复、导出验证脚本不在最小 kit 内；在线 memory 只作为 `pack` 的可选读取 provider。
+- 在线 memory 只能通过外部只读 Adapter 接入 `pack`；凭证和供应商协议由 Adapter 自管，本 kit 只显式写本地 memory。
 
 ## 常用命令
 
@@ -30,7 +30,7 @@ bin/agent-rails publish check --project /path/to/project
 bin/agent-rails estimate --model glm5.1 --tokenizer char --file /path/to/task-pack.md
 bin/agent-rails doctor --project /path/to/project --profile /path/to/profile
 bin/agent-rails doctor --project /path/to/project --profile /path/to/profile --fix
-bin/agent-rails doctor --project /path/to/project --profile /path/to/profile --openmemory-smoke
+bin/agent-rails doctor --project /path/to/project --profile /path/to/profile --online-memory-smoke
 bin/agent-rails profile init --project /path/to/project
 bin/agent-rails profile init --project /path/to/project --scope project
 bin/agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local
@@ -47,11 +47,14 @@ bin/agent-rails opencode uninstall --project /path/to/project --dry-run
 bin/agent-rails skills install --dest /path/to/project/.claude/skills
 ```
 
-如需启用在线 memory，个人配置可放在：
+如需启用在线 memory，在个人 Profile 中配置只读 Adapter：
 
-```text
-~/.agent-rails/openmemory.env
+```bash
+MEMORY_PROVIDER=hybrid
+AGENT_RAILS_ONLINE_MEMORY_CMD='/path/to/read-only-memory-adapter'
 ```
+
+Adapter 通过运行环境自管凭证，不要把凭证写入 Profile 或本项目。
 
 ## Agent skills
 

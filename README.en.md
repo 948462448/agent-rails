@@ -161,7 +161,7 @@ Personal integrations default to `--mode local` and preserve tracked or user-aut
 
 ## When You Need More Control
 
-Daily use ends here. Updating, uninstalling, custom models, context budgets, Profiles, OpenMemory, and complete tool commands live in the reference documentation:
+Daily use ends here. Updating, uninstalling, custom models, context budgets, Profiles, online memory Adapters, and complete tool commands live in the reference documentation:
 
 - [English CLI Reference](./docs/cli-reference.en.md)
 - [中文 CLI 参考](./docs/cli-reference.zh-CN.md)

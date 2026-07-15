@@ -67,7 +67,7 @@ Use `--decision update` or `--decision merge` when that better describes the act
 ## Rules
 
 - Do not ask the user to approve local memory writes; the model is responsible for the value judgment.
-- Do not write OpenMemory from this kit. Online memory is a read provider unless a separate integration is explicitly added.
+- This kit writes only curated local cards. The external online memory Adapter is read-only and owns its own credentials and provider protocol.
 - Write at most one card per task unless the task produced clearly independent durable lessons.
 - Keep `staleness: verify-first` unless the fact is a stable user preference or repo convention.
 - Do not rely on a Task Pack to carry durable progress; update or merge the memory card when reusable facts changed.

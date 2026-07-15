@@ -845,31 +845,174 @@ test_doctor_fix_refreshes_stale_adapter_version() {
   assert_contains "$output" "Doctor status: OK"
 }
 
-test_doctor_openmemory_smoke_dry_run() {
-  local repo="$TMP_ROOT/doctor-openmemory-smoke"
-  local profile="$TMP_ROOT/openmemory-smoke.profile"
-  local request_path="$TMP_ROOT/openmemory-smoke-request.json"
+test_doctor_uses_python_target_context_without_reloading_profile() {
+  local repo="$TMP_ROOT/doctor-python-target-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/doctor-python-target-context.profile"
+  local env_file="$TMP_ROOT/doctor-python-target-context.env"
+  local profile_count="$TMP_ROOT/doctor-python-target-context-profile-count"
+  local env_count="$TMP_ROOT/doctor-python-target-context-env-count"
+  local task_pack="$TMP_ROOT/doctor-python-target-context-pack.md"
+  local repo_abs output
+  mkdir -p "$nested"
+  git -C "$repo" init -q
+  printf '# doctor target context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  repo_abs="$(cd "$repo" && pwd -P)"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'profile_count="%s"\n' "$profile_count"
+    printf 'count=0\n'
+    printf '[[ ! -f "$profile_count" ]] || count="$(cat "$profile_count")"\n'
+    printf 'printf "%%s\\n" "$((count + 1))" > "$profile_count"\n'
+    printf 'PROJECT_NAME="profile-project"\n'
+    printf 'PROJECT_WORKTREE_SLUG="profile-must-not-replace-caller"\n'
+    printf 'AGENT_RAILS_ENV_FILE="%s"\n' "$env_file"
+  } > "$profile"
+  {
+    printf 'env_count="%s"\n' "$env_count"
+    printf 'count=0\n'
+    printf '[[ ! -f "$env_count" ]] || count="$(cat "$env_count")"\n'
+    printf 'printf "%%s\\n" "$((count + 1))" > "$env_count"\n'
+    printf 'PROJECT_NAME="env-project"\n'
+    printf 'AGENT_RAILS_MODEL="qwen3.7-max"\n'
+    printf 'AGENT_RAILS_PACK_MODE="audit"\n'
+    printf 'TASK_PACK_PATH="%s"\n' "$task_pack"
+  } > "$env_file"
+
+  output="$(PROJECT_WORKTREE_SLUG=caller-worktree "$AGENT_RAILS_BIN" doctor \
+    --project "$nested" \
+    --profile "$profile")"
+
+  assert_contains "$output" "Project: $repo_abs"
+  assert_contains "$output" "Env file: $env_file"
+  assert_contains "$output" "Pack mode: audit"
+  assert_contains "$output" "Model preset: qwen3.7-max"
+  assert_contains "$output" "Task Pack path: $task_pack"
+  [[ "$(cat "$profile_count")" == "1" ]]
+  [[ "$(cat "$env_count")" == "1" ]]
+  assert_file_contains "$ROOT_DIR/scripts/agent-doctor.sh" "scripts/agent-python-cli.py"
+  assert_file_not_contains "$ROOT_DIR/scripts/agent-doctor.sh" "agent_target_project_"
+}
+
+test_doctor_preserves_missing_profile_failure_contract() {
+  local repo="$TMP_ROOT/doctor-missing-profile-contract"
+  local missing_profile="$TMP_ROOT/doctor-missing-profile-contract.profile"
+  local output status
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# doctor missing profile\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  if output="$("$AGENT_RAILS_BIN" doctor --project "$repo" --profile "$missing_profile" 2>&1)"; then
+    printf 'Expected Doctor with a missing Profile to fail.\n' >&2
+    exit 1
+  else
+    status=$?
+  fi
+
+  [[ "$status" -eq 1 ]]
+  assert_contains "$output" "[FAIL] Profile not found: $missing_profile"
+  assert_contains "$output" "Doctor status: FAIL (1 failure(s)"
+}
+
+test_doctor_online_memory_smoke_uses_fake_adapter() {
+  local repo="$TMP_ROOT/doctor-online-memory-smoke"
+  local profile="$TMP_ROOT/online-memory-smoke.profile"
+  local adapter="$TMP_ROOT/fake-online-memory-adapter.sh"
+  local capture="$TMP_ROOT/fake-online-memory-capture.txt"
   local output
   mkdir -p "$repo"
   git -C "$repo" init -q
   printf '# temp\n' > "$repo/README.md"
   git -C "$repo" add README.md
   git_commit "$repo" init
-  cat > "$profile" <<PROFILE
-source "$ROOT_DIR/profiles/default.profile"
-MEMORY_PROVIDER="hybrid"
-OPENMEMORY_BASE_URL="https://example.invalid"
-OPENMEMORY_MEMORY="agent_rails"
-OPENMEMORY_INSTANCE="agent_rails_memory_card"
-OPENMEMORY_TOKEN_ENV="OPENMEMORY_ACCESS_KEY"
-OPENMEMORY_DRY_RUN_REQUEST="1"
-OPENMEMORY_REQUEST_DUMP_PATH="$request_path"
-PROFILE
+  cat > "$adapter" <<'ADAPTER'
+#!/usr/bin/env bash
+set -euo pipefail
+: "${ONLINE_MEMORY_CAPTURE:?}"
+{
+  printf 'project=%s\n' "$AGENT_RAILS_MEMORY_PROJECT"
+  printf 'limit=%s\n' "$AGENT_RAILS_MEMORY_LIMIT"
+  printf 'query='
+  tr '\n' ' ' < "$AGENT_RAILS_MEMORY_QUERY_FILE"
+  printf '\n'
+} > "$ONLINE_MEMORY_CAPTURE"
+printf -- '- Fake online memory card\n'
+ADAPTER
+  chmod +x "$adapter"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'MEMORY_PROVIDER="hybrid"\n'
+    printf 'AGENT_RAILS_ONLINE_MEMORY_CMD="%s"\n' "$adapter"
+  } > "$profile"
 
-  output="$(OPENMEMORY_ACCESS_KEY=dummy "$AGENT_RAILS_BIN" doctor --project "$repo" --profile "$profile" --openmemory-smoke)"
+  output="$(ONLINE_MEMORY_CAPTURE="$capture" "$AGENT_RAILS_BIN" doctor \
+    --project "$repo" \
+    --profile "$profile" \
+    --online-memory-smoke)"
 
-  assert_contains "$output" "OpenMemory smoke dry-run request written"
-  assert_file_contains "$request_path" '"memory": "agent_rails"'
+  assert_contains "$output" "Memory provider: hybrid"
+  assert_contains "$output" "Online memory command configured."
+  assert_contains "$output" "Online memory smoke read OK."
+  assert_not_contains "$output" "Fake online memory card"
+  assert_file_contains "$capture" "project=doctor-online-memory-smoke"
+  assert_file_contains "$capture" "limit=1"
+  assert_file_contains "$capture" "query=Agent Rails Doctor online memory smoke. "
+}
+
+test_doctor_online_memory_smoke_hides_adapter_failure() {
+  local repo="$TMP_ROOT/doctor-online-memory-failure"
+  local profile="$TMP_ROOT/online-memory-failure.profile"
+  local secret="unit-test-private-online-memory-error-123456"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'MEMORY_PROVIDER="online"\n'
+    printf '%s\n' 'AGENT_RAILS_ONLINE_MEMORY_CMD='"'"'printf "private adapter error: %s\n" "$DOCTOR_ONLINE_MEMORY_SECRET" >&2; exec sleep 5'"'"''
+  } > "$profile"
+
+  output="$(DOCTOR_ONLINE_MEMORY_SECRET="$secret" \
+    AGENT_RAILS_ONLINE_MEMORY_TIMEOUT_SECONDS=1 \
+    "$AGENT_RAILS_BIN" doctor \
+    --project "$repo" \
+    --profile "$profile" \
+    --online-memory-smoke)"
+
+  assert_contains "$output" "Online memory smoke failed; adapter diagnostics were suppressed."
+  assert_not_contains "$output" "private adapter error"
+  assert_not_contains "$output" "$secret"
+}
+
+test_doctor_warns_when_online_memory_command_is_missing() {
+  local repo="$TMP_ROOT/doctor-online-memory-missing-command"
+  local profile="$TMP_ROOT/online-memory-missing-command.profile"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'MEMORY_PROVIDER="online"\n'
+  } > "$profile"
+
+  output="$(AGENT_RAILS_ONLINE_MEMORY_CMD= "$AGENT_RAILS_BIN" doctor \
+    --project "$repo" \
+    --profile "$profile" \
+    --online-memory-smoke)"
+
+  assert_contains "$output" "Memory provider: online"
+  assert_contains "$output" "[WARN] AGENT_RAILS_ONLINE_MEMORY_CMD is not configured."
+  assert_not_contains "$output" "Online memory smoke read OK."
 }
 
 run_adapter_foundation_tests() {
@@ -901,7 +1044,11 @@ run_adapter_claude_tests() {
   run_test test_doctor_reports_missing_adapter_as_warning "doctor reports missing adapter as warning"
   run_test test_doctor_ok_after_local_install "doctor ok after local install"
   run_test test_doctor_fix_refreshes_stale_adapter_version "doctor --fix refreshes stale adapter version"
-  run_test test_doctor_openmemory_smoke_dry_run "doctor openmemory smoke dry-run"
+  run_test test_doctor_uses_python_target_context_without_reloading_profile "doctor uses Python Target Project Context once"
+  run_test test_doctor_preserves_missing_profile_failure_contract "doctor preserves missing Profile failure contract"
+  run_test test_doctor_online_memory_smoke_uses_fake_adapter "doctor online memory smoke uses fake adapter"
+  run_test test_doctor_online_memory_smoke_hides_adapter_failure "doctor online memory smoke hides adapter failure"
+  run_test test_doctor_warns_when_online_memory_command_is_missing "doctor warns when online memory command is missing"
 }
 
 run_adapter_tests() {

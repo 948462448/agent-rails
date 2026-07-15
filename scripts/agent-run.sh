@@ -15,11 +15,6 @@ USAGE
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
 AGENT_RAILS_BIN="$AGENT_RAILS_HOME/bin/agent-rails"
-# shellcheck source=scripts/agent-paths.sh
-source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
-# shellcheck source=scripts/agent-target-project.sh
-source "$AGENT_RAILS_HOME/scripts/agent-target-project.sh"
-agent_rails_init_paths
 
 project="$PWD"
 profile_path=""
@@ -100,17 +95,24 @@ if [[ ! -d "$project" ]]; then
   exit 2
 fi
 
-agent_target_project_resolve "$project" "$profile_path" || exit $?
-agent_target_project_load_profile required || exit 2
+target_context_args=(
+  --project "$project"
+  --agent-rails-home "$AGENT_RAILS_HOME"
+  --required-profile
+  --load-env-file
+  --shell
+)
+if [[ -n "$profile_path" ]]; then
+  target_context_args+=(--profile "$profile_path")
+fi
+target_context_assignments="$({
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 -E "$AGENT_RAILS_HOME/scripts/agent-python-cli.py" \
+      target-context "${target_context_args[@]}"
+})" || exit $?
+eval "$target_context_assignments"
 project_abs="$AGENT_TARGET_PROJECT_ROOT"
 profile_path="$AGENT_TARGET_PROJECT_PROFILE_PATH"
-
-AGENT_RAILS_ENV_FILE="${AGENT_RAILS_ENV_FILE:-}"
-if [[ -n "$AGENT_RAILS_ENV_FILE" && -f "$AGENT_RAILS_ENV_FILE" ]]; then
-  # shellcheck source=/dev/null
-  source "$AGENT_RAILS_ENV_FILE"
-fi
-agent_target_project_finalize
 task_pack_path="$AGENT_TARGET_PROJECT_TASK_PACK_PATH"
 
 goal="${goal_parts[*]:-TODO: describe the concrete user goal.}"

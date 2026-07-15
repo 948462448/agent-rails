@@ -41,5 +41,5 @@ agent-rails run --project /path/to/project --profile /path/to/profile "<goal>"
 - Do not skip reading the generated Task Pack.
 - Do not hide the session marker. If Agent Rails is skipped, say `AGENT RAILS: SKIPPED (reason=<reason>)`.
 - Do not force a full grill for lite POC/deploy-prep work.
-- Do not write OpenMemory from this kit.
+- Treat the external online memory Adapter as read-only; its credentials and provider protocol stay outside this kit.
 - Local memory writes are allowed only after `agent-memory-curator` decides the lesson is durable.

@@ -208,10 +208,10 @@ test_publish_check_summarizes_scope_and_redacts_secrets() {
   printf 'DEPLOY_PASSWORD=unit-test-staged-secret-123456\n' >> "$repo/scripts/run.sh"
   git -C "$repo" add scripts/run.sh
   printf 'API_TOKEN=unit-test-unstaged-secret-123456\n' >> "$repo/scripts/run.sh"
-  printf 'OPENMEMORY_ACCESS_KEY=super-secret-value\n' > "$repo/.env.local"
+  printf 'SERVICE_ACCESS_KEY=super-secret-value\n' > "$repo/.env.local"
   {
     printf 'AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base\n'
-    printf 'OPENMEMORY_TOKEN_ENV="${OPENMEMORY_TOKEN_ENV:-OPENMEMORY_ACCESS_KEY}"\n'
+    printf 'SERVICE_TOKEN_ENV="${SERVICE_TOKEN_ENV:-SERVICE_ACCESS_KEY}"\n'
   } > "$repo/tokenizer.md"
 
   output="$("$AGENT_RAILS_BIN" publish check --project "$repo")"
@@ -227,7 +227,7 @@ test_publish_check_summarizes_scope_and_redacts_secrets() {
   assert_contains "$output" "COMMITTED_COOKIE=<redacted>"
   assert_contains "$output" "DEPLOY_PASSWORD=<redacted>"
   assert_contains "$output" "API_TOKEN=<redacted>"
-  assert_contains "$output" "OPENMEMORY_ACCESS_KEY=<redacted>"
+  assert_contains "$output" "SERVICE_ACCESS_KEY=<redacted>"
   assert_not_contains "$output" "LEGACY_TOKEN=<redacted>"
   assert_not_contains "$output" "unit-test-historical-secret"
   assert_not_contains "$output" "unit-test-committed-secret"
@@ -235,7 +235,7 @@ test_publish_check_summarizes_scope_and_redacts_secrets() {
   assert_not_contains "$output" "unit-test-unstaged-secret"
   assert_not_contains "$output" "super-secret-value"
   assert_not_contains "$output" "TIKTOKEN_ENCODING=<redacted>"
-  assert_not_contains "$output" "OPENMEMORY_TOKEN_ENV=<redacted>"
+  assert_not_contains "$output" "SERVICE_TOKEN_ENV=<redacted>"
   assert_contains "$output" "Suggested verification:"
 }
 
@@ -249,10 +249,10 @@ test_sensitive_output_module_redacts_supported_formats() {
   local scan_diff_findings="$TMP_ROOT/sensitive-output-scan-diff-findings.txt"
 
   cat > "$input" <<'SENSITIVE'
-OPENMEMORY_ACCESS_KEY=unit-test-secret-shell-123456
+SERVICE_ACCESS_KEY=unit-test-secret-shell-123456
 authorization: Bearer unit-test-secret-header-123456
 "api_key": "unit-test-secret-json-123456",
-OPENMEMORY_TOKEN_ENV="${OPENMEMORY_TOKEN_ENV:-OPENMEMORY_ACCESS_KEY}"
+SERVICE_TOKEN_ENV="${SERVICE_TOKEN_ENV:-SERVICE_ACCESS_KEY}"
 AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base
 AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="$(normalize_positive_int "$AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE" 2)"
 token = substr(content, 1, 1)
@@ -271,10 +271,10 @@ SENSITIVE
   agent_sensitive_redact_file "$input" "$redacted"
   agent_sensitive_scan_file "$input" > "$findings"
 
-  assert_file_contains "$redacted" 'OPENMEMORY_ACCESS_KEY=<redacted>'
+  assert_file_contains "$redacted" 'SERVICE_ACCESS_KEY=<redacted>'
   assert_file_contains "$redacted" 'authorization: <redacted>'
   assert_file_contains "$redacted" '"api_key": "<redacted>",'
-  assert_file_contains "$redacted" 'OPENMEMORY_TOKEN_ENV="${OPENMEMORY_TOKEN_ENV:-OPENMEMORY_ACCESS_KEY}"'
+  assert_file_contains "$redacted" 'SERVICE_TOKEN_ENV="${SERVICE_TOKEN_ENV:-SERVICE_ACCESS_KEY}"'
   assert_file_contains "$redacted" 'AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base'
   assert_file_contains "$redacted" 'AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="<redacted>"'
   assert_file_contains "$redacted" 'token = <redacted>'
@@ -287,7 +287,7 @@ SENSITIVE
   assert_file_not_contains "$redacted" 'unit-test-secret'
   assert_file_not_contains "$redacted" 'unit-test-private-key-material'
 
-  assert_file_contains "$findings" 'OPENMEMORY_ACCESS_KEY=<redacted>'
+  assert_file_contains "$findings" 'SERVICE_ACCESS_KEY=<redacted>'
   assert_file_contains "$findings" 'authorization: <redacted>'
   assert_file_contains "$findings" '"api_key": "<redacted>",'
   assert_file_not_contains "$findings" 'TOKEN_ENV'
@@ -517,6 +517,184 @@ test_estimate_uses_deepseek_preset() {
   assert_contains "$output" "TPM: 1200000"
 }
 
+test_estimate_preserves_profile_file_stdin_and_error_contracts() {
+  local profile="$TMP_ROOT/python-estimate.profile"
+  local input_file="$TMP_ROOT/python-estimate-input.txt"
+  local output status
+  {
+    printf 'AGENT_RAILS_MODEL="qwen3.7-max"\n'
+    printf 'AGENT_RAILS_TOKENIZER="char"\n'
+    printf 'AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="3"\n'
+  } > "$profile"
+  printf '你好' > "$input_file"
+
+  output="$("$AGENT_RAILS_BIN" estimate --profile "$profile" --file "$input_file")"
+  assert_contains "$output" "Source: file: $input_file"
+  assert_contains "$output" "Characters: 2"
+  assert_contains "$output" "Bytes: 6"
+  assert_contains "$output" "Estimated tokens: 1"
+  assert_contains "$output" "Model: qwen3.7-max (preset)"
+
+  output="$(printf 'abcd' | "$AGENT_RAILS_BIN" estimate --tokenizer char --chars-per-token invalid)"
+  assert_contains "$output" "Source: stdin"
+  assert_contains "$output" "Chars/token estimate: 2"
+  assert_contains "$output" "Estimated tokens: 2"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" estimate --tokenizer invalid abc 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Unknown tokenizer: invalid"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" estimate --file "$TMP_ROOT/missing-estimate-input" 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Input file not found: $TMP_ROOT/missing-estimate-input"
+}
+
+test_python_estimate_modules() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_estimate.py"
+}
+
+test_python_target_project_modules() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_target_project.py"
+}
+
+test_python_profile_init_modules() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_profile_init.py"
+}
+
+test_python_online_memory_modules() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_online_memory.py"
+}
+
+install_target_python_shadow_package() {
+  local repo="$1"
+  mkdir -p "$repo/agent_rails"
+  cat > "$repo/agent_rails/__init__.py" <<'PYTHON'
+import os
+from pathlib import Path
+
+Path(os.environ["AGENT_RAILS_SHADOW_MARKER"]).write_text("shadow package executed\n")
+PYTHON
+  printf 'raise SystemExit(73)\n' > "$repo/agent_rails/__main__.py"
+  cat > "$repo/sitecustomize.py" <<'PYTHON'
+import os
+
+with open(os.environ["AGENT_RAILS_SHADOW_MARKER"], "w", encoding="utf-8") as marker:
+    marker.write("sitecustomize executed\n")
+PYTHON
+}
+
+test_python_cli_bootstrap_ignores_target_shadow_package_for_run() {
+  local repo="$TMP_ROOT/python-bootstrap-run"
+  local profile="$TMP_ROOT/python-bootstrap-run.profile"
+  local adapter="$TMP_ROOT/python-bootstrap-run-adapter.sh"
+  local task_pack="$TMP_ROOT/python-bootstrap-run-task-pack.md"
+  local marker="$TMP_ROOT/python-bootstrap-run-shadow-marker"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# trusted bootstrap run\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  cat > "$adapter" <<'ADAPTER'
+#!/usr/bin/env bash
+printf -- '- title: Trusted bootstrap online card\n'
+ADAPTER
+  chmod +x "$adapter"
+  {
+    printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
+    printf 'PROJECT_NAME="python-bootstrap-run"\n'
+    printf 'TASK_PACK_PATH="%s"\n' "$task_pack"
+    printf 'MEMORY_PROVIDER="hybrid"\n'
+    printf 'AGENT_RAILS_ONLINE_MEMORY_CMD="%s"\n' "$adapter"
+  } > "$profile"
+
+  output="$(cd "$repo" && PYTHONPATH=. AGENT_RAILS_SHADOW_MARKER="$marker" \
+    "$AGENT_RAILS_BIN" run --project . --profile "$profile" --token-budget 5000 \
+      --tokenizer char "trusted Python bootstrap")"
+
+  assert_contains "$output" "Agent Rails Estimate"
+  assert_file_contains "$task_pack" "Trusted bootstrap online card"
+  assert_file_not_exists "$marker"
+}
+
+test_python_cli_bootstrap_preserves_relative_estimate_file() {
+  local repo="$TMP_ROOT/python-bootstrap-estimate"
+  local marker="$TMP_ROOT/python-bootstrap-estimate-shadow-marker"
+  local output
+  mkdir -p "$repo"
+  install_target_python_shadow_package "$repo"
+  printf 'relative input\n' > "$repo/input.md"
+
+  output="$(cd "$repo" && PYTHONPATH=. AGENT_RAILS_SHADOW_MARKER="$marker" \
+    "$AGENT_RAILS_BIN" estimate --tokenizer char --chars-per-token 1 --file input.md)"
+
+  assert_contains "$output" "Source: file: input.md"
+  assert_contains "$output" "Estimated tokens: 15"
+  assert_file_not_exists "$marker"
+}
+
+test_python_cli_bootstrap_ignores_target_shadow_package_for_profile_init() {
+  local repo="$TMP_ROOT/python-bootstrap-profile-init"
+  local marker="$TMP_ROOT/python-bootstrap-profile-init-shadow-marker"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# trusted bootstrap profile init\n' > "$repo/README.md"
+  install_target_python_shadow_package "$repo"
+
+  output="$(cd "$repo" && PYTHONPATH=. AGENT_RAILS_SHADOW_MARKER="$marker" \
+    "$AGENT_RAILS_BIN" profile init --project . --name trusted-profile --print-only)"
+
+  assert_contains "$output" 'PROJECT_NAME="trusted-profile"'
+  assert_file_not_exists "$marker"
+}
+
+test_python_cli_bootstrap_ignores_target_shadow_package_for_doctor() {
+  local repo="$TMP_ROOT/python-bootstrap-doctor"
+  local profile="$TMP_ROOT/python-bootstrap-doctor.profile"
+  local adapter="$TMP_ROOT/python-bootstrap-doctor-adapter.sh"
+  local marker="$TMP_ROOT/python-bootstrap-doctor-shadow-marker"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# trusted bootstrap doctor\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  cat > "$adapter" <<'ADAPTER'
+#!/usr/bin/env bash
+printf -- '- Doctor bootstrap card\n'
+ADAPTER
+  chmod +x "$adapter"
+  {
+    printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
+    printf 'PROJECT_NAME="python-bootstrap-doctor"\n'
+    printf 'MEMORY_PROVIDER="online"\n'
+    printf 'AGENT_RAILS_ONLINE_MEMORY_CMD="%s"\n' "$adapter"
+  } > "$profile"
+
+  output="$(cd "$repo" && PYTHONPATH=. AGENT_RAILS_SHADOW_MARKER="$marker" \
+    "$AGENT_RAILS_BIN" doctor --project . --profile "$profile" --online-memory-smoke)"
+
+  assert_contains "$output" "Online memory smoke read OK."
+  assert_file_not_exists "$marker"
+}
+
 test_run_print_only_does_not_write_pack() {
   local repo="$TMP_ROOT/run-print-only"
   local output_path="$TMP_ROOT/run-print-only-pack.md"
@@ -742,6 +920,15 @@ run_workflow_tests() {
   run_test test_estimate_uses_model_preset "estimate uses model preset"
   run_test test_estimate_uses_custom_tokenizer_command "estimate uses custom tokenizer command"
   run_test test_estimate_uses_deepseek_preset "estimate uses deepseek preset"
+  run_test test_estimate_preserves_profile_file_stdin_and_error_contracts "estimate preserves profile, input, and error contracts"
+  run_test test_python_estimate_modules "Python estimate modules"
+  run_test test_python_target_project_modules "Python Paths, Profile, and Target Project modules"
+  run_test test_python_profile_init_modules "Python Profile Init module"
+  run_test test_python_online_memory_modules "Python provider-neutral Online Memory Interface"
+  run_test test_python_cli_bootstrap_ignores_target_shadow_package_for_run "Python CLI bootstrap ignores Target Project shadow package for run"
+  run_test test_python_cli_bootstrap_preserves_relative_estimate_file "Python CLI bootstrap preserves relative estimate file"
+  run_test test_python_cli_bootstrap_ignores_target_shadow_package_for_profile_init "Python CLI bootstrap ignores Target Project shadow package for Profile Init"
+  run_test test_python_cli_bootstrap_ignores_target_shadow_package_for_doctor "Python CLI bootstrap ignores Target Project shadow package for Doctor"
   run_test test_run_print_only_does_not_write_pack "run print-only does not write pack"
   run_test test_run_generates_pack_and_instructions "run generates pack and instructions"
   run_test test_run_infers_deep_for_refactor_goal "run infers deep for refactor goal"

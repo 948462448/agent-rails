@@ -21,7 +21,7 @@ Examples:
 
 The model decides whether the lesson is valuable. This helper records that
 decision. It writes local memory only with --write-local; it never writes
-OpenMemory.
+through an online memory Adapter.
 USAGE
 }
 
@@ -285,7 +285,7 @@ fi
 
 {
   printf '# Agent Rails Memory Decision\n\n'
-  printf '> Model-curated decision log. Local memory is written only when `--write-local` is used. OpenMemory is never written by this helper.\n\n'
+  printf '> Model-curated decision log. Local memory is written only when `--write-local` is used. This helper never writes through an online memory Adapter.\n\n'
 
   printf '## Source Context\n\n'
   printf -- '- Project: `%s`\n' "$PROJECT_NAME"
@@ -357,7 +357,7 @@ fi
   printf -- '- The lesson is reusable for future tasks, not a one-off transcript summary.\n'
   printf -- '- Existing memory/docs were checked for duplicates or conflicts.\n'
   printf -- '- `Verify` tells the next agent how to confirm the claim.\n'
-  printf -- '- OpenMemory was not written by this helper.\n'
+  printf -- '- The online memory Adapter was not used for writing.\n'
 } > "$output_path"
 
 printf 'Wrote %s\n' "$output_path"

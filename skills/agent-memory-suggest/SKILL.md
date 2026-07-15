@@ -37,7 +37,7 @@ Project-mode adapters expect `agent-rails` on PATH. Local adapters may use the a
 
 - Do not decide memory value here; use `agent-memory-curator`.
 - `--write-local` writes only to the local memory directory from the profile.
-- This helper never writes OpenMemory.
+- This helper writes only local memory; it never writes through the online memory Adapter.
 - Never write secrets or raw sensitive service responses.
 - Prefer one small card over a broad summary.
 

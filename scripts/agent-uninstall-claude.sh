@@ -192,7 +192,7 @@ remove_session_hook_settings() {
 
   local args=(uninstall --settings "$claude_settings_path" --hook "$session_hook_path")
   [[ "$dry_run" -eq 1 ]] && args+=(--dry-run)
-  python3 "$session_hook_settings_script" "${args[@]}"
+  python3 -E "$session_hook_settings_script" "${args[@]}"
 }
 
 local_ignore_paths() {

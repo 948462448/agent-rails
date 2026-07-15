@@ -139,7 +139,15 @@ Managed Adapter Workspace 只刷新或删除带 Agent Rails ownership marker 的
 
 ## Memory 与敏感输出
 
-本地 card 位于 `~/.agent-rails/memory/<project>/`。在线 memory 只作为可选读取 provider；本 kit 不写 OpenMemory。AccessKey、cookie、token 不得写入仓库；Base64/URL 编码不算脱敏。
+本地 card 位于 `~/.agent-rails/memory/<project>/`，也是本 kit 唯一会显式写入的 memory。在线 memory 通过可选的外部只读 Adapter 接入：
+
+```bash
+MEMORY_PROVIDER=hybrid
+AGENT_RAILS_ONLINE_MEMORY_CMD='/path/to/read-only-memory-adapter'
+AGENT_RAILS_ONLINE_MEMORY_TIMEOUT_SECONDS=8
+```
+
+Adapter 从 `AGENT_RAILS_MEMORY_QUERY_FILE`、`AGENT_RAILS_MEMORY_PROJECT` 和 `AGENT_RAILS_MEMORY_LIMIT` 读取查询上下文，向 stdout 输出 UTF-8 Markdown。一次调用必须是一个有界进程树，不支持 daemonize 或主动脱离进程组；宿主执行总 deadline、流式 1 MB 输出上限、敏感信息脱敏，并把返回内容包在不可信数据区。凭证、网络协议和供应商细节由 Adapter 的运行环境自管，不得写入 Profile、Task Pack 或仓库。Base64/URL 编码不算脱敏。可用 `doctor --online-memory-smoke` 显式测试该只读路径。
 
 ## 相关设计
 

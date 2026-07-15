@@ -46,18 +46,38 @@ test_changelog_contains_version_file() {
   assert_file_contains "$ROOT_DIR/CHANGELOG.md" "## $EXPECTED_AGENT_RAILS_VERSION"
 }
 
-test_update_dry_run_sequences_project_refresh() {
-  local repo="$TMP_ROOT/update-dry-run"
-  local output
+prepare_update_repo() {
+  local repo="$1"
   mkdir -p "$repo"
   git -C "$repo" init -q
   printf '# temp\n' > "$repo/README.md"
   git -C "$repo" add README.md
   git_commit "$repo" init
+}
 
-  output="$("$AGENT_RAILS_BIN" update --project "$repo" --skip-pull --skip-tests --dry-run --session-hook)"
+test_update_requires_explicit_tool() {
+  local repo="$TMP_ROOT/update-requires-tool"
+  local output
+  prepare_update_repo "$repo"
+
+  if output="$("$AGENT_RAILS_BIN" update --project "$repo" --skip-pull --skip-tests --dry-run 2>&1)"; then
+    printf 'Expected project update to require --tool.\n' >&2
+    return 1
+  fi
+
+  assert_contains "$output" "--tool is required for agent-rails update"
+  assert_contains "$output" "--tool claude, codex, or opencode"
+}
+
+test_update_claude_dry_run_sequences_project_refresh() {
+  local repo="$TMP_ROOT/update-claude-dry-run"
+  local output
+  prepare_update_repo "$repo"
+
+  output="$("$AGENT_RAILS_BIN" update --project "$repo" --tool claude --skip-pull --skip-tests --dry-run --session-hook)"
 
   assert_contains "$output" "Agent Rails Update"
+  assert_contains "$output" "Tool: claude"
   if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     assert_contains "$output" "Skip git pull (--skip-pull)."
   else
@@ -67,10 +87,54 @@ test_update_dry_run_sequences_project_refresh() {
   assert_contains "$output" "Run pre-upgrade doctor"
   assert_contains "$output" "Would run: $AGENT_RAILS_BIN doctor --project"
   assert_contains "$output" "Refresh target adapter and skills"
-  assert_contains "$output" "agent-install-claude.sh"
-  assert_not_contains "$output" "agent-install-claude.sh --force"
+  assert_contains "$output" "$AGENT_RAILS_BIN claude install --project"
+  assert_not_contains "$output" "agent-install-claude.sh"
   assert_contains "$output" "--session-hook"
   assert_contains "$output" "Run final doctor"
+}
+
+test_update_codex_uses_codex_install_and_doctor() {
+  local repo="$TMP_ROOT/update-codex-dry-run"
+  local output
+  prepare_update_repo "$repo"
+
+  output="$("$AGENT_RAILS_BIN" update --project "$repo" --tool codex --skip-pull --skip-tests --dry-run)"
+
+  assert_contains "$output" "Tool: codex"
+  assert_not_contains "$output" "Adapter mode:"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN codex doctor --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN codex install --project"
+  assert_contains "$output" "--fix-project"
+  assert_not_contains "$output" "claude install"
+  assert_not_contains "$output" "opencode install"
+}
+
+test_update_opencode_uses_opencode_install_and_doctor() {
+  local repo="$TMP_ROOT/update-opencode-dry-run"
+  local output
+  prepare_update_repo "$repo"
+
+  output="$("$AGENT_RAILS_BIN" update --project "$repo" --tool opencode --skip-pull --skip-tests --dry-run)"
+
+  assert_contains "$output" "Tool: opencode"
+  assert_not_contains "$output" "Adapter mode:"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN opencode doctor --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN opencode install --project"
+  assert_not_contains "$output" "claude install"
+  assert_not_contains "$output" "codex install"
+}
+
+test_update_rejects_claude_options_for_other_tools() {
+  local repo="$TMP_ROOT/update-tool-options"
+  local output
+  prepare_update_repo "$repo"
+
+  if output="$("$AGENT_RAILS_BIN" update --project "$repo" --tool opencode --session-hook --skip-pull --skip-tests --dry-run 2>&1)"; then
+    printf 'Expected OpenCode update to reject Claude-only options.\n' >&2
+    return 1
+  fi
+
+  assert_contains "$output" "--mode, --session-hook, and --global-reminder are only supported with --tool claude"
 }
 
 test_update_falls_back_from_missing_legacy_kit_profile() {
@@ -84,11 +148,22 @@ test_update_falls_back_from_missing_legacy_kit_profile() {
   git_commit "$repo" init
   assert_file_not_exists "$legacy_profile"
 
-  output="$("$AGENT_RAILS_BIN" update --project "$repo" --profile "$legacy_profile" --skip-pull --skip-tests --dry-run)"
+  output="$("$AGENT_RAILS_BIN" update --project "$repo" --profile "$legacy_profile" --tool claude --skip-pull --skip-tests --dry-run)"
 
   assert_contains "$output" "Profile: $ROOT_DIR/profiles/default.profile"
   assert_not_contains "$output" "$legacy_profile"
   assert_contains "$output" "Refresh target adapter and skills"
+}
+
+test_upgrade_self_rejects_tool() {
+  local output
+
+  if output="$(cd "$TMP_ROOT" && "$AGENT_RAILS_BIN" upgrade self --tool claude --skip-pull --skip-tests --dry-run 2>&1)"; then
+    printf 'Expected upgrade self to reject --tool.\n' >&2
+    return 1
+  fi
+
+  assert_contains "$output" "--tool is not supported by agent-rails upgrade self"
 }
 
 test_upgrade_self_only_skips_project_refresh() {
@@ -112,11 +187,16 @@ test_upgrade_self_only_skips_project_refresh() {
 
 test_release_update_skips_source_only_test_suite() {
   local release_home="$TMP_ROOT/release-update-home"
+  local repo="$TMP_ROOT/release-update-project"
   local marker="$TMP_ROOT/release-update-tests-ran"
   local output
-  mkdir -p "$release_home/tests"
-  cp -R "$ROOT_DIR/bin" "$ROOT_DIR/scripts" "$release_home/"
+  mkdir -p "$release_home/tests" "$repo"
+  cp -R "$ROOT_DIR/bin" "$ROOT_DIR/profiles" "$ROOT_DIR/scripts" "$release_home/"
   cp "$ROOT_DIR/VERSION" "$release_home/VERSION"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
 
   cat > "$release_home/tests/run.sh" <<SH
 #!/usr/bin/env bash
@@ -127,15 +207,21 @@ SH
 
   if ! output="$(
     env -u AGENT_RAILS_HOME \
-      "$release_home/bin/agent-rails" upgrade self --skip-pull --dry-run 2>&1
+      "$release_home/bin/agent-rails" update \
+        --project "$repo" \
+        --tool opencode \
+        --skip-pull \
+        --dry-run 2>&1
   )"; then
-    printf 'Expected a Release update to skip the source-only test suite.\n' >&2
+    printf 'Expected a Release project update to skip the source-only test suite.\n' >&2
     printf 'Actual output:\n%s\n' "$output" >&2
     return 1
   fi
 
   assert_file_not_exists "$marker"
   assert_contains "$output" "Skip source test suite for verified Release installation."
+  assert_contains "$output" "opencode doctor --project"
+  assert_contains "$output" "opencode install --project"
   assert_contains "$output" "Agent Rails update complete."
 }
 
@@ -408,8 +494,13 @@ run_core_tests() {
   run_test test_version_command_reads_version_file "version command reads VERSION"
   run_test test_plugin_manifests_match_version_file "plugin manifests match VERSION"
   run_test test_changelog_contains_version_file "changelog contains VERSION"
-  run_test test_update_dry_run_sequences_project_refresh "update dry-run sequences project refresh"
+  run_test test_update_requires_explicit_tool "update requires an explicit tool"
+  run_test test_update_claude_dry_run_sequences_project_refresh "update refreshes Claude with Claude doctor"
+  run_test test_update_codex_uses_codex_install_and_doctor "update refreshes Codex with Codex doctor"
+  run_test test_update_opencode_uses_opencode_install_and_doctor "update refreshes OpenCode with OpenCode doctor"
+  run_test test_update_rejects_claude_options_for_other_tools "update rejects Claude-only options for other tools"
   run_test test_update_falls_back_from_missing_legacy_kit_profile "update falls back from missing legacy kit profile"
+  run_test test_upgrade_self_rejects_tool "upgrade self rejects project tool selection"
   run_test test_upgrade_self_only_skips_project_refresh "upgrade self skips project refresh"
   run_test test_release_update_skips_source_only_test_suite "release update skips source-only test suite"
   run_test test_release_build_creates_installable_assets "release build creates installable assets"

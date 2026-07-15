@@ -47,13 +47,25 @@ jobs:
           trap 'rm -rf "$smoke_root"' EXIT
           tar -xzf dist/agent-rails.tar.gz -C "$smoke_root"
           release_home="$smoke_root/agent-rails-$version"
+          project="$smoke_root/project"
+          mkdir -p "$project"
+          git -C "$project" init -q
           env -u AGENT_RAILS_HOME "$release_home/bin/agent-rails" --version
           output="$(
             env -u AGENT_RAILS_HOME \
-              "$release_home/bin/agent-rails" upgrade self --skip-pull --dry-run
+              "$release_home/bin/agent-rails" update \
+                --project "$project" \
+                --tool opencode \
+                --skip-pull \
+                --dry-run
           )"
           if [[ "$output" != *"Skip source test suite for verified Release installation."* ]]; then
             printf 'Built release did not use the Release update path.\n' >&2
+            printf '%s\n' "$output" >&2
+            exit 1
+          fi
+          if [[ "$output" != *"opencode install --project"* || "$output" != *"opencode doctor --project"* ]]; then
+            printf 'Built release did not dispatch OpenCode maintenance correctly.\n' >&2
             printf '%s\n' "$output" >&2
             exit 1
           fi

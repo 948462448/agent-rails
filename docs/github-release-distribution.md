@@ -55,7 +55,7 @@ Install or roll back to an exact published version:
 agent-rails upgrade self --version 0.6.1
 ```
 
-`agent-rails update` retains the wider Claude maintenance loop: kit update, source tests when running from a Git checkout, target-project Doctor, Claude Adapter refresh, and final Doctor. In a Release Install it uses the verified archive path and skips the source-only test suite. Refresh Codex or OpenCode with `agent-rails setup --project PATH --tool codex|opencode`.
+`agent-rails update --tool claude|codex|opencode` is the wider project maintenance loop: kit update, source tests when running from a Git checkout, the selected tool's target-project Doctor, Adapter refresh, and final Doctor. In a Release Install it uses the verified archive path and skips the source-only test suite. Tool selection is mandatory so maintenance cannot silently refresh the wrong Adapter.
 
 ## Publishing a release
 

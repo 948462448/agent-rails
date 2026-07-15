@@ -61,7 +61,7 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Recorded the current research, implementation status, compatibility contracts, migration phases, and next tracer bullet in [Shell To Python Refactor Handoff](./python-refactor-handoff.zh-CN.md).
 - Stopped checksum-verified Release installations from running the source-checkout-only test suite during `upgrade self` and project updates.
 - Added a built-archive smoke gate to the tag-driven Release workflow.
-- Clarified that Claude uses the `update` maintenance flow while Codex and OpenCode refresh through `setup --tool`.
+- Unified project maintenance as `update --tool claude|codex|opencode`, with tool-specific install and Doctor dispatch and no implicit Claude default.
 
 ## Near-Term Backlog
 

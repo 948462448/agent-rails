@@ -10,7 +10,7 @@
 - Added a durable Shell-to-Python refactor handoff with research sources, implementation status, compatibility contracts, migration gates, and the recommended first tracer bullet.
 - Fixed `agent-rails update` in GitHub Release installations so it no longer runs the source-checkout-only test suite after a checksum-verified update.
 - Added regression coverage for Release update behavior and a GitHub Actions smoke test that executes the CLI directly from the built archive.
-- Clarified that `update --mode local --session-hook` refreshes the Claude Adapter; Codex and OpenCode adapters should be refreshed with `setup --tool codex|opencode`.
+- Unified project maintenance as `update --tool claude|codex|opencode`; each tool now uses its own install and Doctor path, and omitting `--tool` no longer defaults to Claude.
 
 ## 0.6.0 - 2026-07-15
 

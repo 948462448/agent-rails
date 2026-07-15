@@ -131,15 +131,15 @@ Roll back or pin to a published version:
 agent-rails upgrade self --version 0.6.1
 ```
 
-After updating the CLI, refresh the project integration for the coding agent you actually use. For OpenCode:
+To update the CLI, run checks, and refresh the current project's Adapter in one maintenance flow, choose the coding agent explicitly. For OpenCode:
 
 ```bash
-agent-rails setup --tool opencode
+agent-rails update --tool opencode
 ```
 
 Run it from the target repository root or any subdirectory; Agent Rails resolves the Git root automatically. Pass `--project PATH` only when operating from outside the repository.
 
-`agent-rails update --mode local --session-hook` is the Claude Adapter maintenance flow; do not use it to refresh Codex or OpenCode.
+`update` never guesses the tool. Use `--tool claude` or `--tool codex` for those Adapters. Initial project connection still uses `setup --tool ...`.
 
 ### Will it pollute the business repository?
 

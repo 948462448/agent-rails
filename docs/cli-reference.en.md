@@ -93,7 +93,14 @@ agent-rails upgrade self [--version VERSION] [--repository OWNER/REPO] \
   [--install-root PATH] [--bin-dir PATH] [--skip-tests] [--dry-run]
 ```
 
-`agent-rails update` is the wider Claude Adapter maintenance loop. After updating the kit, it can run target-project Doctor and refresh the Claude Adapter. A source checkout keeps using `git pull --ff-only` and runs source tests; a Release Install downloads an archive, verifies SHA-256, atomically switches versions, and skips source-only tests. Refresh Codex or OpenCode with `agent-rails setup --project PATH --tool codex|opencode`. In either mode, `--skip-pull` skips the kit update itself.
+Update the kit and maintain one project Adapter in the same flow:
+
+```bash
+agent-rails update --tool claude|codex|opencode [--project PATH] [--profile PATH] \
+  [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
+```
+
+`update` requires one explicit tool, then runs that tool's pre-update Doctor, Adapter refresh, and final Doctor. Claude additionally supports `--mode local|project`, `--session-hook`, and `--global-reminder`; those options are rejected for Codex and OpenCode. A source checkout uses `git pull --ff-only` and runs source tests. A Release Install downloads an archive, verifies SHA-256, atomically switches versions, and skips source-only tests. In either mode, `--skip-pull` skips the kit update itself.
 
 ## Profiles and Project Scope
 

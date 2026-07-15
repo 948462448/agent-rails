@@ -200,15 +200,21 @@ flowchart TD
     STAGE --> SWITCH["原子替换 current 与稳定 CLI symlink"]
     SWITCH --> REEXEC["必要时由新版本重新执行 update"]
 
-    PULL --> TESTS["运行测试"]
-    REEXEC --> TESTS
+    PULL --> TESTS["运行源码测试"]
+    REEXEC --> SKIP_TESTS["跳过仅适用于源码 checkout 的测试"]
     TESTS --> SELF{"只升级 kit？"}
+    SKIP_TESTS --> SELF
     SELF -->|是| DONE["完成，旧版本目录保留用于回滚"]
-    SELF -->|否| DOCTOR["Doctor → 刷新目标 Adapter → Final Doctor"]
-    DOCTOR --> DONE
+    SELF -->|否| TOOL{"显式 --tool"}
+    TOOL -->|claude| CLAUDE["Claude Doctor → Install → Final Doctor"]
+    TOOL -->|codex| CODEX["Codex Doctor → Install → Final Doctor"]
+    TOOL -->|opencode| OPENCODE["OpenCode Doctor → Install → Final Doctor"]
+    CLAUDE --> DONE
+    CODEX --> DONE
+    OPENCODE --> DONE
 ```
 
-Release 安装器在切换前完成下载和校验；任何 checksum、archive layout、版本或用户自有非 symlink 路径异常都会停止。更完整的资产与回滚契约见 [GitHub Release 分发设计](./github-release-distribution.md)。
+Release 安装器在切换前完成下载和校验；任何 checksum、archive layout、版本或用户自有非 symlink 路径异常都会停止。项目维护必须显式选择一种工具，因此不会因为历史默认值误刷 Claude Adapter。更完整的资产与回滚契约见 [GitHub Release 分发设计](./github-release-distribution.md)。
 
 ## 一致性与失败语义
 

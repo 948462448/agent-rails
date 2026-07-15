@@ -32,7 +32,7 @@ Usage:
 Advanced:
   agent-rails --version
   agent-rails version
-  agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
+  agent-rails update --tool claude|codex|opencode [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
   agent-rails upgrade self [--version VERSION] [--repository OWNER/REPO] [--install-root PATH] [--bin-dir PATH] [--skip-tests] [--dry-run]
   agent-rails init [--shell zsh|bash|fish] [--project PATH] [--profile PATH]
   agent-rails pack [--project PATH] [agent-context-pack args...]
@@ -181,7 +181,7 @@ case "$command" in
         ;;
       upgrade)
         shift
-        printf 'Deprecated: use `agent-rails doctor --fix` for project adapter refresh or `agent-rails update` for kit updates.\n' >&2
+        printf 'Deprecated: use `agent-rails doctor --fix` for repair, `agent-rails update --tool claude` for project maintenance, or `agent-rails upgrade self` for kit-only updates.\n' >&2
         "$AGENT_RAILS_HOME/scripts/agent-install-claude.sh" --force "$@"
         ;;
       uninstall)

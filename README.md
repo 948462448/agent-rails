@@ -131,15 +131,15 @@ agent-rails upgrade self
 agent-rails upgrade self --version 0.6.1
 ```
 
-CLI 更新后，按实际使用的 coding agent 刷新项目接入。例如 OpenCode：
+要同时更新 CLI、运行检查并刷新当前项目的 Adapter，显式选择正在使用的 coding agent。例如 OpenCode：
 
 ```bash
-agent-rails setup --tool opencode
+agent-rails update --tool opencode
 ```
 
 在目标仓库的根目录或任意子目录运行即可；Agent Rails 会自动解析 Git 仓库根目录。只有从仓库外操作时才需要显式传 `--project PATH`。
 
-`agent-rails update --mode local --session-hook` 是 Claude Adapter 维护流；不要用它刷新 Codex 或 OpenCode。
+`update` 不猜工具；Claude 和 Codex 分别使用 `--tool claude`、`--tool codex`。首次接入项目仍使用 `setup --tool ...`。
 
 ### 会不会污染业务仓库
 

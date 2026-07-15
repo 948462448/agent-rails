@@ -200,15 +200,21 @@ flowchart TD
     STAGE --> SWITCH["Atomically replace current and stable CLI symlinks"]
     SWITCH --> REEXEC["Re-execute update from the new version when needed"]
 
-    PULL --> TESTS["Run tests"]
-    REEXEC --> TESTS
+    PULL --> TESTS["Run source-checkout tests"]
+    REEXEC --> SKIP_TESTS["Skip source-checkout-only tests"]
     TESTS --> SELF{"Kit-only upgrade?"}
+    SKIP_TESTS --> SELF
     SELF -->|Yes| DONE["Done; keep old version directories for rollback"]
-    SELF -->|No| DOCTOR["Doctor → refresh target Adapter → Final Doctor"]
-    DOCTOR --> DONE
+    SELF -->|No| TOOL{"Explicit --tool"}
+    TOOL -->|claude| CLAUDE["Claude Doctor → Install → Final Doctor"]
+    TOOL -->|codex| CODEX["Codex Doctor → Install → Final Doctor"]
+    TOOL -->|opencode| OPENCODE["OpenCode Doctor → Install → Final Doctor"]
+    CLAUDE --> DONE
+    CODEX --> DONE
+    OPENCODE --> DONE
 ```
 
-The Release Installer finishes downloading and validating before it switches anything. Any checksum, archive-layout, version, or user-owned non-symlink path error stops the operation. See [GitHub Release Distribution](./github-release-distribution.md) for the full asset and rollback contract.
+The Release Installer finishes downloading and validating before it switches anything. Any checksum, archive-layout, version, or user-owned non-symlink path error stops the operation. Project maintenance requires one explicit tool, so a historical default cannot refresh the wrong Adapter. See [GitHub Release Distribution](./github-release-distribution.md) for the full asset and rollback contract.
 
 ## Consistency and Failure Semantics
 

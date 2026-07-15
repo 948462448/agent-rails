@@ -151,4 +151,5 @@ agent-rails upgrade self --version 0.6.0
 - [How Agent Rails Works](./docs/how-agent-rails-works.en.md)
 - [设计与安全边界](./docs/local-adapters-and-release-safety.md)
 - [GitHub Release 分发设计](./docs/github-release-distribution.md)
+- [Token 预算与 OpenCode 请求钩子](./docs/token-budget-and-opencode-hook.zh-CN.md)
 - [更新记录](./CHANGELOG.md)

@@ -5,7 +5,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [--budget CHARS] [--token-budget TOKENS] [--tokenizer auto|char|tiktoken|command] [--print-only] [goal text...]
+Usage: agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [--budget CHARS] [--token-budget TOKENS] [--tokenizer auto|char|tiktoken|command|huggingface] [--tokenizer-command CMD] [--tokenizer-path PATH] [--print-only] [goal text...]
 
 Generates a Task Pack, estimates its size, and prints the next commands/instructions
 for an agent session. This wrapper does not hard-control Claude/Codex internals.
@@ -28,6 +28,8 @@ pack_mode_arg=""
 budget_arg=""
 token_budget_arg=""
 tokenizer_arg=""
+tokenizer_command_arg=""
+tokenizer_path_arg=""
 print_only=0
 goal_parts=()
 
@@ -66,6 +68,16 @@ while [[ $# -gt 0 ]]; do
     --tokenizer)
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       tokenizer_arg="$2"
+      shift 2
+      ;;
+    --tokenizer-command)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      tokenizer_command_arg="$2"
+      shift 2
+      ;;
+    --tokenizer-path)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      tokenizer_path_arg="$2"
       shift 2
       ;;
     --print-only)
@@ -149,7 +161,16 @@ if [[ -n "$token_budget_arg" ]]; then
   pack_args+=(--token-budget "$token_budget_arg")
 fi
 if [[ -n "$tokenizer_arg" ]]; then
+  pack_args+=(--tokenizer "$tokenizer_arg")
   estimate_args+=(--tokenizer "$tokenizer_arg")
+fi
+if [[ -n "$tokenizer_command_arg" ]]; then
+  pack_args+=(--tokenizer-command "$tokenizer_command_arg")
+  estimate_args+=(--tokenizer-command "$tokenizer_command_arg")
+fi
+if [[ -n "$tokenizer_path_arg" ]]; then
+  pack_args+=(--tokenizer-path "$tokenizer_path_arg")
+  estimate_args+=(--tokenizer-path "$tokenizer_path_arg")
 fi
 
 shell_quote() {

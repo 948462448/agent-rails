@@ -95,29 +95,29 @@ fi
 context="$(cat <<EOF
 AGENT RAILS SESSION HOOK ACTIVE
 
-Local adapter active. Before broad reads/edits, choose the smallest useful path and show its marker.
+Before broad reads/edits, choose the smallest path and show its marker.
 
-Visible marker protocol:
-- Pack/lite: relay the command's AGENT RAILS: ON marker.
-- Check-only: say AGENT RAILS: CHECK-ONLY (reason=<reason>).
-- Skip: say AGENT RAILS: SKIPPED (reason=<reason>).
+Markers:
+- Pack/lite: relay the printed AGENT RAILS: ON marker.
+- Check-only: AGENT RAILS: CHECK-ONLY (reason=<reason>).
+- Skip: AGENT RAILS: SKIPPED (reason=<reason>).
 
 Trigger matrix:
 - Deep: cross-subproject, contract/schema/model, ADR, migration/refactor, ambiguous product work.
 - Lite: POC, deploy prep, codegen check, focused continuation.
-- Check-only: branch-consuming deploy/release/upload and final verification planning.
-- Skip: read-only/fixed operations with no repo or branch-consumption risk.
+- Check-only: branch-consuming deploy/release/upload or final verification.
+- Skip: read-only/fixed work with no branch risk.
 
 Target scope:
 - Session root: $project_root
-- Same-repo worktree: pass its exact root to pack/check.
-- Sibling/different repo: do not reuse this --profile; resolve the target's profile.
-- After a target change, regenerate the pack and verify Current Git State.
+- Worktree: pass its exact root to pack/check.
+- Other repo: do not reuse this --profile; resolve its profile.
+- Target changed: regenerate pack; verify Current Git State.
 
 Sensitive output:
 - Base64 and URL encoding are not redaction.
-- Project only decision fields from logs/DOM/tables/output; avoid auth-bearing context.
-- Do not repeat exposed secrets; narrow reads and report the surface.
+- Read only decision fields; avoid auth-bearing context.
+- Do not repeat secrets; narrow reads and report exposure.
 
 Commands:
 ar="$AGENT_RAILS_BIN"
@@ -126,7 +126,7 @@ project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 "\$ar" pack --project "\$project_root"$profile_arg --pack-mode lite "<goal>"
 "\$ar" check --project "\$project_root"$profile_arg --print-only
 
-Read the generated pack. The project adapter remains the source for exact details.
+Read the generated pack; the project adapter has exact details.
 EOF
 )"
 

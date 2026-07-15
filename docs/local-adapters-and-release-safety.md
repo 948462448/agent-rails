@@ -8,7 +8,9 @@ For a narrative overview of the complete system and its diagrams, see [How Agent
 
 ### First-Class OpenCode Adapter
 
-- `agent-rails opencode install` creates project-local guide, command, skill, and configuration files.
+- `agent-rails opencode install` creates a project-local request plugin plus guide, command, skill, and configuration files.
+- The request plugin uses OpenCode's `experimental.chat.system.transform` hook. It reads the current session, derives the input ceiling from `model.limit`, reserves response/safety space, and injects a token-budgeted Pack on each model request.
+- Candidate context is refreshed for each user message and reused within that turn. The plugin never trims OpenCode's own conversation history.
 - Installation uses local Git excludes by default and does not modify the user's global OpenCode configuration.
 - Installed skill names are recorded in adapter-local inventories (`.claude/.agent-rails-managed-skills` and `.opencode/.agent-rails-managed-skills`); uninstall removes only those exact names and leaves unrelated skills intact.
 - `doctor` verifies the generated integration, while `uninstall` removes only Agent Rails-managed artifacts and preserves tracked files unless explicitly forced.
@@ -50,6 +52,8 @@ The shared Target Project Context Module canonicalizes explicit `--project` path
 - Base64 and URL encoding are treated as representation changes, not redaction.
 - Operators should project only required fields from logs, DOM snapshots, job tables, and similar sources, and must not repeat an exposed secret in later output.
 - Task Pack files are rendered to a same-directory `0600` staging file and atomically replace the destination only after successful generation. Failed writes do not print success, retain a stale pack as fresh output, or chmod a non-file destination.
+- Token-budget Packs are assembled under a hard cap. Required sections receive minimum floors, weighted categories receive the remaining budget, and unused shares are redistributed to categories with unmet demand.
+- Exact external or Hugging Face tokenizers are optional. The long-lived OpenCode assembler loads them once and caches counts by content hash; `auto` safely falls back to a character estimate.
 - Task Pack excerpts and publish secret findings share a Sensitive Output Guard for supported shell/YAML/JSON assignments, Authorization headers, and PEM private-key blocks.
 
 Automatic Task Pack sanitization is deliberately conservative: placeholders and tokenizer configuration remain readable, while supported secret-bearing values are replaced with `<redacted>`. Publish scanning reuses the same detection grammar but excludes recognizable code expressions. For tracked files it scans only added committed, staged, and unstaged diff lines and maps findings back to source paths and line numbers; untracked text files are scanned in full. Tests remain in scope when their lines change, while unchanged fixtures and removed values do not become release findings. Encoded envelopes and unnamed high-entropy material still require explicit operator care.

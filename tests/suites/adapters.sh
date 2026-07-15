@@ -3,6 +3,7 @@
 test_opencode_install_doctor_and_uninstall() {
   local repo="$TMP_ROOT/opencode-install"
   local repo_abs
+  local plugin_path
   local output
   local exclude_path
   mkdir -p "$repo"
@@ -13,11 +14,21 @@ test_opencode_install_doctor_and_uninstall() {
   git_commit "$repo" init
 
   output="$("$AGENT_RAILS_BIN" opencode install --project "$repo")"
+  plugin_path="$repo_abs/.opencode/plugins/agent-rails.mjs"
 
   assert_contains "$output" "Agent Rails opencode Install"
   assert_contains "$output" "opencode adapter ready"
   assert_contains "$output" "Restart opencode"
-  assert_file_contains "$repo/.opencode/opencode.json" "\"$repo_abs/.opencode/AGENT_RAILS.md\""
+  assert_file_contains "$repo/.opencode/opencode.json" "\"$plugin_path\""
+  assert_file_not_contains "$repo/.opencode/opencode.json" "\"$repo_abs/.opencode/AGENT_RAILS.md\""
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "experimental.chat.system.transform"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "client.session.messages"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "--token-budget"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "model.limit"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" '"contextPercent": 25'
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" '"hookTimeoutMs": 30000'
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "sessionStates"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "AGENT_RAILS_CANDIDATE_OUTPUT"
   assert_file_contains "$repo/.opencode/AGENT_RAILS.md" "Visible session marker protocol"
   assert_file_contains "$repo/.opencode/command/agent-rails-pack.md" '$ARGUMENTS'
   assert_file_contains "$repo/.opencode/command/agent-rails-lite.md" "--pack-mode lite"
@@ -30,28 +41,75 @@ test_opencode_install_doctor_and_uninstall() {
     *) exclude_path="$repo/$exclude_path" ;;
   esac
   assert_file_contains "$exclude_path" ".opencode/opencode.json"
+  assert_file_contains "$exclude_path" ".opencode/plugins/agent-rails.mjs"
   assert_file_contains "$exclude_path" ".opencode/skills/agent-*/"
 
   output="$("$AGENT_RAILS_BIN" opencode doctor --project "$repo")"
   assert_contains "$output" "Agent Rails opencode Doctor"
   assert_contains "$output" "[OK] opencode Agent Rails guide"
-  assert_contains "$output" "[OK] opencode config loads Agent Rails instructions"
+  assert_contains "$output" "[OK] opencode request hook"
+  assert_contains "$output" "[OK] opencode config loads Agent Rails plugin"
 
   mkdir -p "$repo/.opencode/skills/agent-custom"
   printf 'user-owned\n' > "$repo/.opencode/skills/agent-custom/SKILL.md"
 
   output="$("$AGENT_RAILS_BIN" opencode uninstall --project "$repo" --dry-run)"
   assert_contains "$output" "Agent Rails opencode Uninstall"
-  assert_contains "$output" "Would remove Agent Rails instructions"
+  assert_contains "$output" "Would remove Agent Rails plugin"
+  assert_contains "$output" "Would remove $plugin_path"
   assert_contains "$output" "Would remove $repo_abs/.opencode/AGENT_RAILS.md"
 
   "$AGENT_RAILS_BIN" opencode uninstall --project "$repo" >/dev/null
   assert_file_not_exists "$repo/.opencode/opencode.json"
+  assert_file_not_exists "$repo/.opencode/plugins/agent-rails.mjs"
   assert_file_not_exists "$repo/.opencode/AGENT_RAILS.md"
   assert_file_not_exists "$repo/.opencode/command/agent-rails-pack.md"
   assert_file_not_exists "$repo/.opencode/skills/agent-context-pack"
   assert_file_exists "$repo/.opencode/skills/agent-custom/SKILL.md"
   assert_file_contains "$repo/.opencode/skills/agent-custom/SKILL.md" "user-owned"
+}
+
+test_opencode_plugin_migrates_legacy_config_and_preserves_user_entries() {
+  local repo="$TMP_ROOT/opencode-plugin-config-migration"
+  local repo_abs plugin_path config_path
+  mkdir -p "$repo/.opencode"
+  repo_abs="$(cd "$repo" && pwd -P)"
+  plugin_path="$repo_abs/.opencode/plugins/agent-rails.mjs"
+  config_path="$repo/.opencode/opencode.json"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  python3 - "$config_path" "$repo_abs" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+repo = sys.argv[2]
+path.write_text(json.dumps({
+    "$schema": "https://opencode.ai/config.json",
+    "plugin": ["file:///tmp/user-plugin.mjs"],
+    "instructions": ["USER_RULES.md", f"{repo}/.opencode/AGENT_RAILS.md"],
+    "theme": "system",
+}, indent=2) + "\n")
+PY
+
+  "$AGENT_RAILS_BIN" opencode install --project "$repo" >/dev/null
+
+  assert_file_contains "$config_path" 'file:///tmp/user-plugin.mjs'
+  assert_file_contains "$config_path" "\"$plugin_path\""
+  assert_file_contains "$config_path" 'USER_RULES.md'
+  assert_file_not_contains "$config_path" "$repo_abs/.opencode/AGENT_RAILS.md"
+  assert_file_contains "$config_path" '"theme": "system"'
+
+  "$AGENT_RAILS_BIN" opencode uninstall --project "$repo" >/dev/null
+
+  assert_file_contains "$config_path" 'file:///tmp/user-plugin.mjs'
+  assert_file_not_contains "$config_path" "$plugin_path"
+  assert_file_contains "$config_path" 'USER_RULES.md'
+  assert_file_contains "$config_path" '"theme": "system"'
 }
 
 test_managed_adapter_workspace_module_contract() {
@@ -738,6 +796,7 @@ PROFILE
 
 run_adapter_foundation_tests() {
   run_test test_opencode_install_doctor_and_uninstall "opencode install/doctor/uninstall"
+  run_test test_opencode_plugin_migrates_legacy_config_and_preserves_user_entries "opencode plugin migrates legacy config"
   run_test test_managed_adapter_workspace_module_contract "managed adapter workspace module contract"
   run_test test_adapter_content_module_contract "shared adapter content module contract"
   run_test test_adapter_install_preserves_unmanaged_generated_paths "adapter install preserves unmanaged generated paths"

@@ -499,6 +499,143 @@ test_pack_uses_deepseek_model_preset_budget() {
   assert_file_contains "$output" 'Total: `320000` chars'
 }
 
+test_context_assembler_enforces_token_budget_and_redistributes_unused_shares() {
+  local raw="$TMP_ROOT/context-assembler-raw.md"
+  local output="$TMP_ROOT/context-assembler-output.md"
+  local metadata="$TMP_ROOT/context-assembler-metadata.json"
+  local used redistributed
+  {
+    printf '# Agent Task Pack\n\n'
+    printf '## Session Marker\n\nAGENT RAILS: ON\n\n'
+    printf '## Goal\n\nKeep the token budget exact.\n\n'
+    printf '## Current Git State\n\n- Branch: test\n\n'
+    printf '## Changed File Excerpts\n\n'
+    for line_number in $(seq 1 80); do
+      printf 'git-evidence-%02d-abcdefghijklmnopqrstuvwxyz\n' "$line_number"
+    done
+    printf '\n## Agent Rails Contract\n\n- Preserve required rules.\n\n'
+    printf '## Memory Cards\n\n- No local cards selected.\n\n'
+    printf '## Verification Suggestions\n\n- Run the focused test.\n\n'
+    printf '## Delivery Checklist\n\n- What changed\n'
+  } > "$raw"
+
+  python3 "$ROOT_DIR/scripts/agent-context-assemble.py" \
+    --input "$raw" \
+    --output "$output" \
+    --metadata "$metadata" \
+    --budget-tokens 420 \
+    --tokenizer char \
+    --chars-per-token 1
+
+  used="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["used_tokens"])' "$metadata")"
+  redistributed="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["redistributed_tokens"])' "$metadata")"
+  [[ "$used" -le 420 ]]
+  [[ "$redistributed" -gt 0 ]]
+  assert_file_contains "$output" "## Goal"
+  assert_file_contains "$output" "Keep the token budget exact."
+  assert_file_contains "$output" "## Agent Rails Contract"
+  assert_file_contains "$output" "git-evidence-"
+}
+
+test_context_assembler_server_caches_token_counts() {
+  local counter="$TMP_ROOT/tokenizer-counter.sh"
+  local count_file="$TMP_ROOT/tokenizer-counter.count"
+  local result="$TMP_ROOT/tokenizer-server-result.json"
+  cat > "$counter" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+count_file="${TOKENIZER_COUNT_FILE:?}"
+current=0
+[[ ! -f "$count_file" ]] || current="$(cat "$count_file")"
+printf '%s\n' "$((current + 1))" > "$count_file"
+wc -c < "$AGENT_RAILS_TOKENIZER_INPUT" | tr -d '[:space:]'
+SCRIPT
+  chmod +x "$counter"
+
+  TOKENIZER_COUNT_FILE="$count_file" python3 - "$ROOT_DIR/scripts/agent-context-assemble.py" "$counter" "$result" <<'PY'
+import json
+import subprocess
+import sys
+
+assembler, counter, result = sys.argv[1:]
+proc = subprocess.Popen(
+    [sys.executable, assembler, "--serve", "--tokenizer", "command", "--tokenizer-command", counter],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    text=True,
+)
+responses = []
+for request_id in ("one", "two"):
+    proc.stdin.write(json.dumps({"id": request_id, "action": "count", "text": "same-content"}) + "\n")
+    proc.stdin.flush()
+    responses.append(json.loads(proc.stdout.readline()))
+proc.stdin.close()
+proc.terminate()
+proc.wait(timeout=5)
+with open(result, "w", encoding="utf-8") as handle:
+    json.dump(responses, handle)
+PY
+
+  [[ "$(cat "$count_file")" -eq 1 ]]
+  assert_file_contains "$result" '"cache_hit": true'
+}
+
+test_pack_token_budget_uses_token_assembler() {
+  local repo="$TMP_ROOT/pack-token-assembler"
+  local output="$TMP_ROOT/pack-token-assembler-task-pack.md"
+  local chars
+  mkdir -p "$repo/src"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  for line_number in $(seq 1 120); do
+    printf 'token-aware-evidence-%03d-abcdefghijklmnopqrstuvwxyz\n' "$line_number"
+  done > "$repo/src/large.txt"
+
+  AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE=1 "$AGENT_RAILS_BIN" pack \
+    --project "$repo" \
+    --output "$output" \
+    --token-budget 1400 \
+    --tokenizer char \
+    "token aware pack" >/dev/null
+
+  chars="$(LC_ALL=en_US.UTF-8 wc -m < "$output" | tr -d '[:space:]')"
+  [[ "$chars" -le 1400 ]]
+  assert_file_contains "$output" "## Goal"
+  assert_file_contains "$output" "token aware pack"
+  assert_file_contains "$output" "Token allocator:"
+}
+
+test_pack_candidate_output_defers_hard_budget_to_request_hook() {
+  local repo="$TMP_ROOT/pack-candidate-output"
+  local output="$TMP_ROOT/pack-candidate-output-task-pack.md"
+  local chars
+  mkdir -p "$repo/src"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  for line_number in $(seq 1 40); do
+    printf 'candidate-evidence-%03d-abcdefghijklmnopqrstuvwxyz\n' "$line_number"
+  done > "$repo/src/large.txt"
+
+  AGENT_RAILS_CANDIDATE_OUTPUT=1 \
+    AGENT_RAILS_CONTEXT_BUDGET_TOKENS=200 \
+    AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE=1 \
+    "$AGENT_RAILS_BIN" pack \
+      --project "$repo" \
+      --output "$output" \
+      --tokenizer char \
+      "request hook candidates" >/dev/null
+
+  chars="$(LC_ALL=en_US.UTF-8 wc -m < "$output" | tr -d '[:space:]')"
+  [[ "$chars" -gt 200 ]]
+  assert_file_contains "$output" "Mode: candidate output"
+  assert_file_not_contains "$output" "Token allocator:"
+  assert_file_contains "$output" "candidate-evidence-"
+}
+
 test_pack_modes_bound_size_without_dropping_capabilities() {
   local repo="$TMP_ROOT/pack-mode-density"
   local profile="$TMP_ROOT/pack-mode-density.profile"
@@ -678,6 +815,10 @@ run_context_tests() {
   run_test test_pack_uses_model_preset_budget "pack uses model preset budget"
   run_test test_pack_uses_lite_model_preset_budget "pack uses lite model preset budget"
   run_test test_pack_uses_deepseek_model_preset_budget "pack uses deepseek model preset budget"
+  run_test test_context_assembler_enforces_token_budget_and_redistributes_unused_shares "context assembler enforces token budget and redistributes unused shares"
+  run_test test_context_assembler_server_caches_token_counts "context assembler server caches token counts"
+  run_test test_pack_token_budget_uses_token_assembler "pack token budget uses token assembler"
+  run_test test_pack_candidate_output_defers_hard_budget_to_request_hook "pack candidate output defers hard budget"
   run_test test_pack_modes_bound_size_without_dropping_capabilities "pack modes bound size without dropping capabilities"
   run_test test_profile_init_ignores_non_python_tests_dir "profile init ignores shell-only tests dir"
   run_test test_profile_init_writes_user_config_by_default "profile init writes user config by default"

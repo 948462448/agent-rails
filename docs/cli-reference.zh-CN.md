@@ -32,12 +32,16 @@ agent-rails run \
   [--model NAME] \
   [--pack-mode lite|normal|deep|audit] \
   [--budget CHARS|--token-budget TOKENS] \
-  [--tokenizer auto|char|tiktoken|command] \
+  [--tokenizer auto|char|tiktoken|command|huggingface] \
+  [--tokenizer-command CMD] \
+  [--tokenizer-path PATH] \
   [--print-only] \
   "目标"
 ```
 
 `run` 编排 `pack`、`estimate`、`check` 和 memory handoff，但不硬控制 Agent 内核。
+
+指定 `--token-budget` 后，`pack` 会按栏目权重组装并硬限制最终 token 数；空闲类别的额度会回流。`huggingface` 从 `--tokenizer-path` 加载本地 tokenizer，`command` 从 `AGENT_RAILS_TOKENIZER_INPUT` 读取输入文件。OpenCode 的逐请求预算与 Profile 参数见 [Token 预算与 OpenCode 请求钩子](./token-budget-and-opencode-hook.zh-CN.md)。
 
 ### `verify`
 

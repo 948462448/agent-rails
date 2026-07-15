@@ -5,7 +5,7 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'Usage: %s [--profile PATH] [--base REF] [--target-ref REF] [--output PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [--budget CHARS] [--token-budget TOKENS] [goal text...]\n' "$0"
+  printf 'Usage: %s [--profile PATH] [--base REF] [--target-ref REF] [--output PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [--budget CHARS] [--token-budget TOKENS] [--tokenizer auto|char|tiktoken|command|huggingface] [--tokenizer-command CMD] [--tokenizer-path PATH] [goal text...]\n' "$0"
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +30,9 @@ context_budget_chars_arg=""
 context_budget_tokens_arg=""
 model_arg=""
 pack_mode_arg=""
+tokenizer_arg=""
+tokenizer_command_arg=""
+tokenizer_path_arg=""
 goal_parts=()
 
 while [[ $# -gt 0 ]]; do
@@ -73,6 +76,21 @@ while [[ $# -gt 0 ]]; do
     --pack-mode)
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       pack_mode_arg="$2"
+      shift 2
+      ;;
+    --tokenizer)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      tokenizer_arg="$2"
+      shift 2
+      ;;
+    --tokenizer-command)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      tokenizer_command_arg="$2"
+      shift 2
+      ;;
+    --tokenizer-path)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      tokenizer_path_arg="$2"
       shift 2
       ;;
     --help|-h)
@@ -134,6 +152,10 @@ AGENT_RAILS_GRILL_MAX_QUESTIONS="${AGENT_RAILS_GRILL_MAX_QUESTIONS:-8}"
 AGENT_RAILS_CONTEXT_BUDGET_CHARS="${context_budget_chars_arg:-${AGENT_RAILS_CONTEXT_BUDGET_CHARS:-0}}"
 AGENT_RAILS_CONTEXT_BUDGET_TOKENS="${context_budget_tokens_arg:-${AGENT_RAILS_CONTEXT_BUDGET_TOKENS:-}}"
 AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="${AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE:-2}"
+AGENT_RAILS_TOKENIZER="${tokenizer_arg:-${AGENT_RAILS_TOKENIZER:-auto}}"
+AGENT_RAILS_TOKENIZER_CMD="${tokenizer_command_arg:-${AGENT_RAILS_TOKENIZER_CMD:-}}"
+AGENT_RAILS_TOKENIZER_PATH="${tokenizer_path_arg:-${AGENT_RAILS_TOKENIZER_PATH:-}}"
+AGENT_RAILS_TIKTOKEN_ENCODING="${AGENT_RAILS_TIKTOKEN_ENCODING:-cl100k_base}"
 AGENT_RAILS_BUDGET_GIT_PERCENT="${AGENT_RAILS_BUDGET_GIT_PERCENT:-20}"
 AGENT_RAILS_BUDGET_MEMORY_PERCENT="${AGENT_RAILS_BUDGET_MEMORY_PERCENT:-40}"
 AGENT_RAILS_BUDGET_VERIFY_PERCENT="${AGENT_RAILS_BUDGET_VERIFY_PERCENT:-20}"
@@ -217,6 +239,8 @@ context_budget_chars_input="$(normalize_optional_positive_int "$AGENT_RAILS_CONT
 context_budget_tokens_input="$(normalize_optional_positive_int "$AGENT_RAILS_CONTEXT_BUDGET_TOKENS")"
 AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE=""
 AGENT_RAILS_CONTEXT_BUDGET_SOURCE="unbounded"
+AGENT_RAILS_TOKEN_ALLOCATOR_ACTIVE=0
+AGENT_RAILS_CANDIDATE_OUTPUT_ACTIVE=0
 
 if [[ -n "$context_budget_chars_input" ]]; then
   AGENT_RAILS_CONTEXT_BUDGET_CHARS="$context_budget_chars_input"
@@ -226,17 +250,29 @@ elif [[ -n "$context_budget_tokens_input" ]]; then
   AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE="$context_budget_tokens_input"
   AGENT_RAILS_CONTEXT_BUDGET_CHARS="$((AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE * AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE))"
   AGENT_RAILS_CONTEXT_BUDGET_SOURCE="token budget"
+  AGENT_RAILS_TOKEN_ALLOCATOR_ACTIVE=1
 elif [[ "$AGENT_RAILS_MODEL_PRESET_FOUND" -eq 1 ]]; then
   preset_tokens="$(agent_model_preset_budget_for_mode "$AGENT_RAILS_PACK_MODE")"
   if [[ -n "$preset_tokens" ]]; then
     AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE="$preset_tokens"
     AGENT_RAILS_CONTEXT_BUDGET_CHARS="$((AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE * AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE))"
     AGENT_RAILS_CONTEXT_BUDGET_SOURCE="model preset"
+    AGENT_RAILS_TOKEN_ALLOCATOR_ACTIVE=1
   else
     AGENT_RAILS_CONTEXT_BUDGET_CHARS=0
   fi
 else
   AGENT_RAILS_CONTEXT_BUDGET_CHARS=0
+fi
+
+# OpenCode first asks for the full density-capped candidate set, then applies
+# the live model/session hard budget through the resident tokenizer service.
+if [[ "${AGENT_RAILS_CANDIDATE_OUTPUT:-0}" == "1" ]]; then
+  AGENT_RAILS_CANDIDATE_OUTPUT_ACTIVE=1
+  AGENT_RAILS_TOKEN_ALLOCATOR_ACTIVE=0
+  AGENT_RAILS_CONTEXT_BUDGET_CHARS=0
+  AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE=""
+  AGENT_RAILS_CONTEXT_BUDGET_SOURCE="request-hook candidate output"
 fi
 
 AGENT_RAILS_BUDGET_GIT_PERCENT="$(normalize_percent "$AGENT_RAILS_BUDGET_GIT_PERCENT" 20)"
@@ -284,7 +320,11 @@ esac
 
 section_budget() {
   local percent="$1"
-  if [[ "$AGENT_RAILS_CONTEXT_BUDGET_CHARS" -gt 0 ]]; then
+  if [[ "$AGENT_RAILS_CANDIDATE_OUTPUT_ACTIVE" -eq 1 ]]; then
+    printf '0\n'
+  elif [[ "$AGENT_RAILS_TOKEN_ALLOCATOR_ACTIVE" -eq 1 ]]; then
+    printf '0\n'
+  elif [[ "$AGENT_RAILS_CONTEXT_BUDGET_CHARS" -gt 0 ]]; then
     printf '%s\n' $((AGENT_RAILS_CONTEXT_BUDGET_CHARS * percent / 100))
   else
     printf '0\n'
@@ -939,6 +979,12 @@ if ! chmod 600 "$task_pack_staging_path"; then
   exit 1
 fi
 
+raw_task_pack_path="$tmp_dir/task-pack-raw.md"
+render_target="$task_pack_staging_path"
+if [[ "$AGENT_RAILS_TOKEN_ALLOCATOR_ACTIVE" -eq 1 ]]; then
+  render_target="$raw_task_pack_path"
+fi
+
 if ! {
   printf '# Agent Task Pack\n\n'
   printf '> Generated by Agent Rails.\n\n'
@@ -979,7 +1025,17 @@ if ! {
   fi
   printf -- '- Grill question budget: `%s`\n' "$AGENT_RAILS_GRILL_MAX_QUESTIONS"
   printf -- '- Chars/token estimate: `%s`\n' "$AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE"
-  if [[ "$AGENT_RAILS_CONTEXT_BUDGET_CHARS" -gt 0 ]]; then
+  if [[ "$AGENT_RAILS_CANDIDATE_OUTPUT_ACTIVE" -eq 1 ]]; then
+    printf -- '- Mode: candidate output; the request hook applies the live hard token budget.\n'
+  elif [[ "$AGENT_RAILS_TOKEN_ALLOCATOR_ACTIVE" -eq 1 ]]; then
+    printf -- '- Mode: hard token budget with weighted allocation and unused-share redistribution.\n'
+    printf -- '- Budget source: `%s`\n' "$AGENT_RAILS_CONTEXT_BUDGET_SOURCE"
+    printf -- '- Token budget: `%s` tokens\n' "$AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE"
+    printf -- '- Total: `%s` chars (candidate estimate before hard token allocation)\n' "$AGENT_RAILS_CONTEXT_BUDGET_CHARS"
+    printf -- '- Requested tokenizer: `%s`\n' "$AGENT_RAILS_TOKENIZER"
+    printf -- '- Allocation weights: mandatory `10%%`, git `35%%`, contract `25%%`, memory `15%%`, verification `15%%`.\n'
+    printf -- '- Empty or satisfied categories return unused tokens to categories with remaining demand.\n'
+  elif [[ "$AGENT_RAILS_CONTEXT_BUDGET_CHARS" -gt 0 ]]; then
     printf -- '- Mode: bounded by approximate character budget.\n'
     printf -- '- Budget source: `%s`\n' "$AGENT_RAILS_CONTEXT_BUDGET_SOURCE"
     if [[ -n "$AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE" ]]; then
@@ -1133,9 +1189,35 @@ if ! {
   printf -- '- What was not verified\n'
   printf -- '- Residual risks\n'
   printf -- '- Next action suggestions: fix / do not fix / later\n'
-} > "$task_pack_staging_path"; then
+} > "$render_target"; then
   printf 'Unable to render Task Pack: %s\n' "$TASK_PACK_PATH" >&2
   exit 1
+fi
+
+if [[ "$AGENT_RAILS_TOKEN_ALLOCATOR_ACTIVE" -eq 1 ]]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'python3 is required for token-budget Task Pack assembly.\n' >&2
+    exit 127
+  fi
+  assembler_args=(
+    "$AGENT_RAILS_HOME/scripts/agent-context-assemble.py"
+    --input "$raw_task_pack_path"
+    --output "$task_pack_staging_path"
+    --budget-tokens "$AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE"
+    --tokenizer "$AGENT_RAILS_TOKENIZER"
+    --chars-per-token "$AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE"
+    --tiktoken-encoding "$AGENT_RAILS_TIKTOKEN_ENCODING"
+  )
+  if [[ -n "$AGENT_RAILS_TOKENIZER_CMD" ]]; then
+    assembler_args+=(--tokenizer-command "$AGENT_RAILS_TOKENIZER_CMD")
+  fi
+  if [[ -n "$AGENT_RAILS_TOKENIZER_PATH" ]]; then
+    assembler_args+=(--tokenizer-path "$AGENT_RAILS_TOKENIZER_PATH")
+  fi
+  if ! python3 "${assembler_args[@]}"; then
+    printf 'Unable to enforce Task Pack token budget: %s\n' "$AGENT_RAILS_CONTEXT_BUDGET_TOKENS_EFFECTIVE" >&2
+    exit 1
+  fi
 fi
 if ! mv -f "$task_pack_staging_path" "$TASK_PACK_PATH"; then
   printf 'Unable to replace Task Pack output: %s\n' "$TASK_PACK_PATH" >&2

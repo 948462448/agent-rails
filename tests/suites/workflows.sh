@@ -493,6 +493,14 @@ test_estimate_uses_custom_tokenizer_command() {
   assert_contains "$output" "Tokenizer: command"
   assert_contains "$output" "Estimated tokens: 42"
   assert_contains "$output" "Model: qwen3.7-max (preset)"
+
+  output="$("$AGENT_RAILS_BIN" estimate \
+    --tokenizer auto \
+    --tokenizer-path "$TMP_ROOT/missing-huggingface-tokenizer" \
+    --tokenizer-command 'printf 43' \
+    abcdef)"
+  assert_contains "$output" "Tokenizer: command"
+  assert_contains "$output" "Estimated tokens: 43"
 }
 
 test_estimate_uses_deepseek_preset() {
@@ -524,10 +532,19 @@ test_run_print_only_does_not_write_pack() {
     printf 'TASK_PACK_PATH="%s"\n' "$output_path"
   } > "$profile"
 
-  output="$("$AGENT_RAILS_BIN" run --project "$repo" --profile "$profile" --print-only "run loop")"
+  output="$("$AGENT_RAILS_BIN" run \
+    --project "$repo" \
+    --profile "$profile" \
+    --token-budget 1200 \
+    --tokenizer command \
+    --tokenizer-command 'printf 42' \
+    --print-only \
+    "run loop")"
 
   assert_contains "$output" "AGENT RAILS: ON"
   assert_contains "$output" "Agent Rails Run"
+  assert_contains "$output" "--token-budget"
+  assert_contains "$output" "--tokenizer-command"
   assert_contains "$output" "Print-only mode. No files written."
   assert_file_not_exists "$output_path"
 }

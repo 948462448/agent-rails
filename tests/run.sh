@@ -5,6 +5,7 @@ set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
+export AGENT_RAILS_HOME="$ROOT_DIR"
 AGENT_RAILS_BIN="$ROOT_DIR/bin/agent-rails"
 EXPECTED_AGENT_RAILS_VERSION="$(awk 'NF { print $1; exit }' "$ROOT_DIR/VERSION")"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agent-rails-tests.XXXXXX")"

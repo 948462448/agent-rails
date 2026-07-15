@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added hard token-budget Task Pack assembly with required-section floors, weighted category allocation, unused-share redistribution, exact external/Hugging Face tokenizer support, and a cached long-lived counting service.
+- Replaced OpenCode's static instruction-only integration with a project-local per-request plugin that reads the current session, derives available input space from `model.limit`, and injects a proportional Agent Rails Pack without trimming OpenCode history.
+
 ## 0.6.0 - 2026-07-15
 
 - Added bilingual how-it-works documentation with diagrams for the system architecture, task lifecycle, Target Project and Profile isolation, Adapter ownership, shared Git Scope, and GitHub Release updates.

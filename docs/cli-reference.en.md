@@ -32,12 +32,16 @@ agent-rails run \
   [--model NAME] \
   [--pack-mode lite|normal|deep|audit] \
   [--budget CHARS|--token-budget TOKENS] \
-  [--tokenizer auto|char|tiktoken|command] \
+  [--tokenizer auto|char|tiktoken|command|huggingface] \
+  [--tokenizer-command CMD] \
+  [--tokenizer-path PATH] \
   [--print-only] \
   "goal"
 ```
 
 `run` orchestrates `pack`, `estimate`, `check`, and the memory handoff without controlling the coding agent's internal execution.
+
+With `--token-budget`, `pack` allocates sections by weight, redistributes unused category shares, and hard-caps the final token count. `huggingface` loads a local tokenizer from `--tokenizer-path`; `command` reads the file named by `AGENT_RAILS_TOKENIZER_INPUT`.
 
 ### `verify`
 

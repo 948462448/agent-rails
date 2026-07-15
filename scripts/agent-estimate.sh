@@ -5,7 +5,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails estimate [--profile PATH] [--model NAME] [--tokenizer auto|char|tiktoken|command] [--tokenizer-command CMD] [--chars-per-token N] [--file PATH] [text...]
+Usage: agent-rails estimate [--profile PATH] [--model NAME] [--tokenizer auto|char|tiktoken|command|huggingface] [--tokenizer-command CMD] [--tokenizer-path PATH] [--chars-per-token N] [--file PATH] [text...]
 
 Examples:
   agent-rails estimate --model qwen3.7-max --file ~/.agent-rails/agent-context/project-task-pack.md
@@ -27,6 +27,7 @@ model_arg=""
 chars_per_token_arg=""
 tokenizer_arg=""
 tokenizer_command_arg=""
+tokenizer_path_arg=""
 input_file=""
 text_parts=()
 
@@ -57,6 +58,11 @@ while [[ $# -gt 0 ]]; do
       tokenizer_command_arg="$2"
       shift 2
       ;;
+    --tokenizer-path)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      tokenizer_path_arg="$2"
+      shift 2
+      ;;
     --file)
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       input_file="$2"
@@ -82,6 +88,7 @@ AGENT_RAILS_MODEL="${model_arg:-${AGENT_RAILS_MODEL:-generic}}"
 AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="${chars_per_token_arg:-${AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE:-2}}"
 AGENT_RAILS_TOKENIZER="${tokenizer_arg:-${AGENT_RAILS_TOKENIZER:-auto}}"
 AGENT_RAILS_TOKENIZER_CMD="${tokenizer_command_arg:-${AGENT_RAILS_TOKENIZER_CMD:-}}"
+AGENT_RAILS_TOKENIZER_PATH="${tokenizer_path_arg:-${AGENT_RAILS_TOKENIZER_PATH:-}}"
 AGENT_RAILS_TIKTOKEN_ENCODING="${AGENT_RAILS_TIKTOKEN_ENCODING:-cl100k_base}"
 
 normalize_positive_int() {
@@ -152,6 +159,30 @@ print(len(encoding.encode(text)))
 PY
 }
 
+token_count_with_huggingface() {
+  local path="$1"
+  local tokenizer_path="$2"
+  command -v python3 >/dev/null 2>&1 || return 1
+  [[ -n "$tokenizer_path" ]] || return 1
+  python3 - "$path" "$tokenizer_path" <<'PY'
+import sys
+
+input_path = sys.argv[1]
+tokenizer_path = sys.argv[2]
+
+try:
+    from transformers import AutoTokenizer
+except Exception:
+    sys.exit(3)
+
+with open(input_path, "r", encoding="utf-8", errors="replace") as handle:
+    text = handle.read()
+
+tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+print(len(tokenizer.encode(text, add_special_tokens=False)))
+PY
+}
+
 looks_like_integer() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
@@ -186,7 +217,23 @@ count_tokens() {
       printf 'tiktoken tokenizer unavailable. Install tiktoken or use --tokenizer char/command.\n' >&2
       return 1
       ;;
+    huggingface|hf)
+      if raw_count="$(token_count_with_huggingface "$path" "$AGENT_RAILS_TOKENIZER_PATH" 2>/dev/null)" && looks_like_integer "$raw_count"; then
+        AGENT_RAILS_TOKENIZER_EFFECTIVE="huggingface:$AGENT_RAILS_TOKENIZER_PATH"
+        AGENT_RAILS_TOKEN_COUNT="$raw_count"
+        return 0
+      fi
+      printf 'Hugging Face tokenizer unavailable. Set --tokenizer-path and install transformers.\n' >&2
+      return 1
+      ;;
     auto)
+      if [[ -n "$AGENT_RAILS_TOKENIZER_PATH" ]] \
+        && raw_count="$(token_count_with_huggingface "$path" "$AGENT_RAILS_TOKENIZER_PATH" 2>/dev/null)" \
+        && looks_like_integer "$raw_count"; then
+        AGENT_RAILS_TOKENIZER_EFFECTIVE="huggingface:$AGENT_RAILS_TOKENIZER_PATH"
+        AGENT_RAILS_TOKEN_COUNT="$raw_count"
+        return 0
+      fi
       if [[ -n "$AGENT_RAILS_TOKENIZER_CMD" ]] \
         && raw_count="$(token_count_with_command "$path" 2>/dev/null)" \
         && looks_like_integer "$raw_count"; then

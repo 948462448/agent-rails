@@ -38,7 +38,7 @@ Advanced:
   agent-rails pack [--project PATH] [agent-context-pack args...]
   agent-rails check [--project PATH] [agent-check args...]
   agent-rails publish check [--project PATH] [--profile PATH] [--base REF] [--target-ref REF] [--no-secret-scan]
-  agent-rails estimate [--profile PATH] [--model NAME] [--tokenizer auto|char|tiktoken|command] [--file PATH] [text...]
+  agent-rails estimate [--profile PATH] [--model NAME] [--tokenizer auto|char|tiktoken|command|huggingface] [--tokenizer-command CMD] [--tokenizer-path PATH] [--file PATH] [text...]
   agent-rails doctor [--project PATH] [--profile PATH] [--openmemory-smoke]
   agent-rails profile init [--project PATH] [--name NAME] [--scope user|project] [--print-only]
   agent-rails claude install [--project PATH] [--profile PATH] [--mode local|project] [--global-reminder] [--session-hook]

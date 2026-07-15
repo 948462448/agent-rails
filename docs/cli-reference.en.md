@@ -70,9 +70,11 @@ agent-rails verify \
 | Profiles | `profile init` |
 | Adapters | `claude install/uninstall`, `codex install/doctor/uninstall`, `opencode install/doctor/uninstall` |
 | Maintenance | `update`, `upgrade self`, `init`, `home` |
-| Extensions | `skills install`, `memory suggest`, `eval init/record/report` |
+| Extensions | `skills install`, `memory suggest` |
 
 Use `agent-rails <command> --help` as the exact option reference.
+
+TUI A/B evaluation is not part of the Agent Rails product CLI. Use the standalone `python3 tools/ab_eval.py`; the capture, blind-judge, and trajectory flow is documented in [the Chinese TUI A/B runbook](./tui-ab-eval.zh-CN.md).
 
 Plain `agent-rails init` prints only project-neutral shell command setup. It emits pinned project/Profile compatibility variables only when `--project` is passed explicitly or the corresponding environment is already configured.
 

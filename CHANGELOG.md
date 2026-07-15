@@ -4,6 +4,8 @@
 
 - Added hard token-budget Task Pack assembly with required-section floors, weighted category allocation, unused-share redistribution, exact external/Hugging Face tokenizer support, and a cached long-lived counting service.
 - Replaced OpenCode's static instruction-only integration with a project-local per-request plugin that reads the current session, derives available input space from `model.limit`, and injects a proportional Agent Rails Pack without trimming OpenCode history.
+- Removed the built-in `agent-rails eval` logger and `agent-eval` skill so the product CLI stays focused on runtime capabilities; standalone Python tools now own TUI artifact capture, mirrored blind judging, and Codex/OpenCode trajectory conversion to Run IR, OTel, and ATIF.
+- Added a durable Shell-to-Python refactor handoff with research sources, implementation status, compatibility contracts, migration gates, and the recommended first tracer bullet.
 
 ## 0.6.0 - 2026-07-15
 
@@ -15,8 +17,6 @@
 - Added `agent-rails setup` and `agent-rails verify` as compatible user-journey facades over the existing adapter, Doctor, Agent Check, and publish-check commands.
 - Reduced the bilingual README path to setup, run, and verify, moving customization and troubleshooting details into bilingual CLI reference documents.
 - Made plain `agent-rails init` project-neutral so first-time shell setup no longer pins one repository or prints the advanced workflow; explicit `--project` and `--profile` remain compatible.
-- Removed the built-in `agent-rails eval` logger and `agent-eval` skill so the product CLI stays focused on Agent Rails runtime capabilities; TUI A/B experiments now use a standalone, dependency-free Python capture and blind-judge tool.
-- Added optional Codex JSONL and OpenCode session trajectory conversion to the standalone evaluator, preserving raw input while emitting a versioned Run IR, deterministic trajectory metrics, OTel GenAI-compatible OTLP JSON, and ATIF-v1.7.
 - Stopped Agent Check from adding deleted shell entrypoints to generated `bash -n` verification commands.
 - Added `agent-rails opencode install`, `agent-rails opencode doctor`, and `agent-rails opencode uninstall` for a project-local opencode adapter backed by `.opencode/` instructions, commands, and skills.
 - Scoped SessionStart profiles to their source repository, with explicit worktree and sibling-repository guidance.

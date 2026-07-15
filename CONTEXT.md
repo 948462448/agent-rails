@@ -23,6 +23,9 @@ Agent Rails is a personal, repository-independent kit. It reads a target project
 - **Release Install**: A versioned local kit directory selected through an atomic `current` symlink, with a stable user-level CLI entrypoint.
 - **User Journey Facade**: A small public command that composes existing Interfaces around one user goal without taking ownership of their domain rules. Setup, Run, and Verify form the default journey.
 - **Test Suite**: A domain-grouped set of regression tests loaded by the test runner. Suites share assertions and temporary-workspace setup but own their test cases and execution labels.
+- **Context Budget Assembler**: The Python component that selects and truncates Task Pack sections under a hard token cap using one Tokenizer Interface.
+- **External Evaluation Harness**: Standalone tools that capture completed TUI artifacts, perform blind comparison, and normalize optional trajectories without becoming an Agent Rails runtime command.
+- **Compatibility Shell**: A temporary Shell entrypoint retained during the Python migration only while its public CLI, output, exit-code, path, and mutation contracts are covered by parity tests.
 
 ## Architectural boundaries
 
@@ -43,5 +46,9 @@ Agent Rails is a personal, repository-independent kit. It reads a target project
 - Update preserves both installation models: Git checkouts use fast-forward pull, while Release Installs download verified assets. `upgrade self` never requires Target Project Context; `update` may additionally run tests, Doctor, and Adapter refresh.
 - Setup, Run, and Verify are User Journey Facades. Setup delegates adapter mutation and diagnosis to existing installers and Doctors; Verify delegates change selection and release scope to Agent Check and publish check. Facades must not duplicate Adapter Workspace, Git Scope, Sensitive Output Guard, or Verification Plan rules.
 - The SessionStart hook carries only stable routing and safety guardrails; task-specific evidence and the full execution contract belong in the on-demand Task Pack.
+- The OpenCode request plugin may use the current session and model input limits to assemble Agent Rails context, but it must not trim or rewrite OpenCode-owned history. Its experimental hook signature requires contract coverage.
+- The Context Budget Assembler owns exact final token enforcement, required-section floors, weighted category allocation, and unused-share redistribution. Tokenizer implementations are replaceable and optional model-specific dependencies must not become base-install requirements.
+- The External Evaluation Harness remains outside the product CLI and Target Project Profile lifecycle. Patch and deterministic acceptance stay primary; OTel/ATIF trajectories are diagnostic evidence.
+- During the Python migration, each Compatibility Shell remains until the replacement passes black-box parity for its public and safety contracts. The migration plan and progress ledger live in `docs/python-refactor-handoff.zh-CN.md`.
 - The test runner owns suite selection and global test setup; each Test Suite owns one coherent workflow area.
 - Shared modules must preserve the public CLI, existing adapter paths, and on-disk compatibility unless a migration is explicitly designed.

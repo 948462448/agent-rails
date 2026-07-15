@@ -53,8 +53,17 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Made the default shell bootstrap project-neutral and rewrote the bilingual README around installation, connection, normal conversation, visible activation, and common recovery paths.
 - Recorded the design, tradeoffs, verification, and follow-ups in [Local Adapters And Release Safety](./local-adapters-and-release-safety.md).
 
+## Unreleased - Live Context Budgets, Evaluation Evidence, And Python Migration
+
+- Added a hard token-budget assembler with required-section floors, weighted allocation, unused-share redistribution, exact optional tokenizers, and a long-lived cached counting service.
+- Replaced OpenCode's static integration with a project-local per-request plugin that uses the current session and model limits without trimming OpenCode history.
+- Moved A/B evaluation outside the product CLI into standalone Python capture, mirrored blind-judge, Codex/OpenCode trajectory, OTel, and ATIF tools.
+- Recorded the current research, implementation status, compatibility contracts, migration phases, and next tracer bullet in [Shell To Python Refactor Handoff](./python-refactor-handoff.zh-CN.md).
+
 ## Near-Term Backlog
 
+- Run one real OpenCode `off` versus `rails-lite` A/B fixture and record the non-sensitive summary.
+- Start the Python migration with the read-only `estimate` tracer bullet while retaining CLI parity.
 - Add a clearer repair command or doctor warning for stale adapter profile paths.
 - Extend the Sensitive Output Guard to encoded envelopes and carefully bounded high-entropy detection without increasing configuration false positives.
 - Add an optional publish receipt for artifact, configuration, and smoke-test evidence.

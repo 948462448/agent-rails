@@ -152,4 +152,7 @@ agent-rails upgrade self --version 0.6.0
 - [设计与安全边界](./docs/local-adapters-and-release-safety.md)
 - [GitHub Release 分发设计](./docs/github-release-distribution.md)
 - [Token 预算与 OpenCode 请求钩子](./docs/token-budget-and-opencode-hook.zh-CN.md)
+- [Agent Rails 评测策略](./docs/evaluation-strategy.zh-CN.md)
+- [TUI 黑盒 A/B 盲评手册](./docs/tui-ab-eval.zh-CN.md)
+- [Shell 到 Python 重构交接与开发台账](./docs/python-refactor-handoff.zh-CN.md)
 - [更新记录](./CHANGELOG.md)

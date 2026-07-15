@@ -70,9 +70,11 @@ agent-rails verify \
 | Profile | `profile init` |
 | Adapter | `claude install/uninstall`、`codex install/doctor/uninstall`、`opencode install/doctor/uninstall` |
 | 维护 | `update`、`upgrade self`、`init`、`home` |
-| 扩展 | `skills install`、`memory suggest`、`eval init/record/report` |
+| 扩展 | `skills install`、`memory suggest` |
 
 每个命令的准确参数以 `agent-rails <command> --help` 为准。
+
+TUI A/B 评测不属于 Agent Rails 产品 CLI。使用独立的 `python3 tools/ab_eval.py`；录制、盲评和轨迹转换流程见 [TUI 黑盒 A/B 盲评手册](./tui-ab-eval.zh-CN.md)。
 
 不带项目参数的 `agent-rails init` 只打印 Shell 命令安装配置，不绑定仓库。只有显式传入 `--project` 或已有对应环境变量时，才会继续打印固定项目/Profile 的兼容配置。
 

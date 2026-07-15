@@ -16,16 +16,19 @@ Agent Rails 是一套个人本地护栏，支持 Claude Code、Codex 和 OpenCod
 
 准备条件：本机已有 Git、Bash，以及 Claude Code、Codex 或 OpenCode 中的至少一个。Claude 的启动 Hook 还需要 Python 3。
 
-### 1. 让终端找到 Agent Rails
+### 1. 安装 CLI（不需要 clone）
 
-进入 Agent Rails 仓库：
+下载安装器，先查看内容，再执行：
 
 ```bash
-cd /path/to/agent-rails
-bin/agent-rails init
+curl -fsSL https://github.com/948462448/agent-rails/releases/latest/download/install.sh \
+  -o /tmp/agent-rails-install.sh
+less /tmp/agent-rails-install.sh
+bash /tmp/agent-rails-install.sh
+"$HOME/.local/bin/agent-rails" init
 ```
 
-按输出提示，把几行 Shell 配置加入 `~/.zshrc`、`~/.bashrc` 或 Fish 配置，然后重新加载终端。
+按 `init` 输出提示，把几行 Shell 配置加入 `~/.zshrc`、`~/.bashrc` 或 Fish 配置，然后重新加载终端。如果以前从源码目录使用 Agent Rails，用这段新配置替换旧的 `AGENT_RAILS_HOME`。
 
 确认安装：
 
@@ -114,6 +117,20 @@ agent-rails opencode doctor --project .  # OpenCode
 
 从新的准确目录启动 coding agent。不同仓库不要沿用旧项目的本地接入；需要时在新目录重新运行 `setup`。
 
+### 怎么更新或回滚 CLI
+
+更新到最新 GitHub Release 不需要源码仓库：
+
+```bash
+agent-rails upgrade self
+```
+
+回滚或固定到已发布版本：
+
+```bash
+agent-rails upgrade self --version 0.6.0
+```
+
 ### 会不会污染业务仓库
 
 个人接入默认写入本地忽略区域，并保护已经被 Git 跟踪或由你自己创建的同路径文件。Agent Rails 不会替你提交、推送或发布。
@@ -130,5 +147,8 @@ agent-rails opencode doctor --project .  # OpenCode
 
 - [中文 CLI 参考](./docs/cli-reference.zh-CN.md)
 - [English CLI Reference](./docs/cli-reference.en.md)
+- [Agent Rails 工作原理（含架构图与流程图）](./docs/how-agent-rails-works.zh-CN.md)
+- [How Agent Rails Works](./docs/how-agent-rails-works.en.md)
 - [设计与安全边界](./docs/local-adapters-and-release-safety.md)
+- [GitHub Release 分发设计](./docs/github-release-distribution.md)
 - [更新记录](./CHANGELOG.md)

@@ -3,8 +3,18 @@
 
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/.." && pwd)}"
+source_path="${BASH_SOURCE[0]}"
+while [[ -L "$source_path" ]]; do
+  source_dir="$(cd "$(dirname "$source_path")" && pwd)"
+  source_target="$(readlink "$source_path")"
+  if [[ "$source_target" == /* ]]; then
+    source_path="$source_target"
+  else
+    source_path="$source_dir/$source_target"
+  fi
+done
+script_dir="$(cd "$(dirname "$source_path")" && pwd)"
+AGENT_RAILS_HOME="$(cd "$script_dir/.." && pwd)"
 export AGENT_RAILS_HOME
 # shellcheck source=scripts/agent-paths.sh
 source "$AGENT_RAILS_HOME/scripts/agent-paths.sh"
@@ -23,7 +33,7 @@ Advanced:
   agent-rails --version
   agent-rails version
   agent-rails update [--project PATH] [--profile PATH] [--mode local|project] [--session-hook] [--global-reminder] [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
-  agent-rails upgrade self [update args...]
+  agent-rails upgrade self [--version VERSION] [--repository OWNER/REPO] [--install-root PATH] [--bin-dir PATH] [--skip-tests] [--dry-run]
   agent-rails init [--shell zsh|bash|fish] [--project PATH] [--profile PATH]
   agent-rails pack [--project PATH] [agent-context-pack args...]
   agent-rails check [--project PATH] [agent-check args...]
@@ -106,7 +116,7 @@ case "$command" in
     case "$subcommand" in
       self)
         shift
-        "$AGENT_RAILS_HOME/scripts/agent-update.sh" "$@"
+        "$AGENT_RAILS_HOME/scripts/agent-update.sh" --self-only "$@"
         ;;
       ""|--help|-h)
         "$AGENT_RAILS_HOME/scripts/agent-update.sh" --help

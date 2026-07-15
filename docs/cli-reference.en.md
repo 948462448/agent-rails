@@ -72,6 +72,23 @@ Use `agent-rails <command> --help` as the exact option reference.
 
 Plain `agent-rails init` prints only project-neutral shell command setup. It emits pinned project/Profile compatibility variables only when `--project` is passed explicitly or the corresponding environment is already configured.
 
+## Installation and self-update
+
+The default GitHub Release layout is:
+
+- Version directory: `~/.local/share/agent-rails/releases/<version>`
+- Active version: `~/.local/share/agent-rails/current`
+- CLI entrypoint: `~/.local/bin/agent-rails`
+
+Update only the kit without resolving the current directory as a project or Profile:
+
+```bash
+agent-rails upgrade self [--version VERSION] [--repository OWNER/REPO] \
+  [--install-root PATH] [--bin-dir PATH] [--skip-tests] [--dry-run]
+```
+
+`agent-rails update` is the wider maintenance loop. After updating the kit, it can run tests, target-project Doctor, and Adapter refresh. A source checkout keeps using `git pull --ff-only`; a Release Install downloads an archive, verifies SHA-256, and atomically switches versions. In either mode, `--skip-pull` skips the kit update itself.
+
 ## Profiles and Project Scope
 
 Profile resolution order:
@@ -111,5 +128,8 @@ Local cards live under `~/.agent-rails/memory/<project>/`. Online memory is an o
 ## Related Design
 
 - [Agent Rails Context](../CONTEXT.md)
+- [How Agent Rails Works](./how-agent-rails-works.en.md)
+- [Agent Rails 工作原理](./how-agent-rails-works.zh-CN.md)
 - [Local Adapters And Release Safety](./local-adapters-and-release-safety.md)
+- [GitHub Release Distribution](./github-release-distribution.md)
 - [Development Milestones](./development-milestones.md)

@@ -16,16 +16,19 @@ Agent Rails is a personal, local guardrail for Claude Code, Codex, and OpenCode.
 
 Prerequisites: Git, Bash, and at least one of Claude Code, Codex, or OpenCode. Claude's startup hook also requires Python 3.
 
-### 1. Make Agent Rails available in your shell
+### 1. Install the CLI without cloning
 
-Enter the Agent Rails repository:
+Download the installer, inspect it, and then run it:
 
 ```bash
-cd /path/to/agent-rails
-bin/agent-rails init
+curl -fsSL https://github.com/948462448/agent-rails/releases/latest/download/install.sh \
+  -o /tmp/agent-rails-install.sh
+less /tmp/agent-rails-install.sh
+bash /tmp/agent-rails-install.sh
+"$HOME/.local/bin/agent-rails" init
 ```
 
-Follow the printed instructions to add a small block to `~/.zshrc`, `~/.bashrc`, or your Fish configuration, then reload the shell.
+Follow the `init` instructions to add a small block to `~/.zshrc`, `~/.bashrc`, or your Fish configuration, then reload the shell. If you previously ran Agent Rails from a source directory, replace the old `AGENT_RAILS_HOME` block with this new output.
 
 Confirm the installation:
 
@@ -114,6 +117,20 @@ If the project is not connected, rerun the matching `agent-rails setup --tool ..
 
 Start the coding agent from the exact new directory. Do not reuse another repository's local connection; run `setup` again in the new location when needed.
 
+### How do I update or roll back the CLI?
+
+Update to the latest GitHub Release without a source repository:
+
+```bash
+agent-rails upgrade self
+```
+
+Roll back or pin to a published version:
+
+```bash
+agent-rails upgrade self --version 0.6.0
+```
+
 ### Will it pollute the business repository?
 
 Personal integrations use local ignores by default and preserve tracked or user-authored same-path files. Agent Rails never commits, pushes, or releases on your behalf.
@@ -130,5 +147,8 @@ Daily use ends here. Updating, uninstalling, custom models, context budgets, Pro
 
 - [English CLI Reference](./docs/cli-reference.en.md)
 - [中文 CLI 参考](./docs/cli-reference.zh-CN.md)
+- [How Agent Rails Works (with architecture and flow diagrams)](./docs/how-agent-rails-works.en.md)
+- [Agent Rails 工作原理](./docs/how-agent-rails-works.zh-CN.md)
 - [Design and Safety Boundaries](./docs/local-adapters-and-release-safety.md)
+- [GitHub Release Distribution](./docs/github-release-distribution.md)
 - [Changelog](./CHANGELOG.md)

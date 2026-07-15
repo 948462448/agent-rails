@@ -87,21 +87,161 @@ test_update_falls_back_from_missing_legacy_kit_profile() {
   assert_contains "$output" "Refresh target adapter and skills"
 }
 
-test_upgrade_self_alias_uses_update_flow() {
-  local repo="$TMP_ROOT/upgrade-self"
+test_upgrade_self_only_skips_project_refresh() {
   local output
-  mkdir -p "$repo"
-  git -C "$repo" init -q
-  printf '# temp\n' > "$repo/README.md"
-  git -C "$repo" add README.md
-  git_commit "$repo" init
 
-  output="$("$AGENT_RAILS_BIN" upgrade self --project "$repo" --skip-pull --skip-tests --skip-doctor --skip-adapter --dry-run)"
+  output="$(cd "$TMP_ROOT" && "$AGENT_RAILS_BIN" upgrade self --skip-pull --skip-tests --dry-run)"
 
   assert_contains "$output" "Agent Rails Update"
-  assert_contains "$output" "Skip pre-upgrade doctor (--skip-doctor)."
-  assert_contains "$output" "Skip adapter upgrade (--skip-adapter)."
+  assert_contains "$output" "Mode: self"
+  assert_contains "$output" "Skip git pull (--skip-pull)."
+  assert_contains "$output" "Skip tests (--skip-tests)."
+  assert_not_contains "$output" "Profile not found"
+  assert_not_contains "$output" "Run pre-upgrade doctor"
+  assert_not_contains "$output" "Refresh target adapter and skills"
   assert_contains "$output" "Agent Rails update complete."
+}
+
+prepare_release_fixture() {
+  RELEASE_FIXTURE_DIST="$TMP_ROOT/release-dist"
+  RELEASE_FIXTURE_SERVER="$TMP_ROOT/release-server"
+
+  if [[ ! -f "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz" ]]; then
+    bash "$ROOT_DIR/scripts/build-release.sh" --output "$RELEASE_FIXTURE_DIST" --include-worktree >/dev/null
+  fi
+
+  mkdir -p "$RELEASE_FIXTURE_SERVER/releases/download/v$EXPECTED_AGENT_RAILS_VERSION"
+  cp "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz" \
+    "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz.sha256" \
+    "$RELEASE_FIXTURE_SERVER/releases/download/v$EXPECTED_AGENT_RAILS_VERSION/"
+}
+
+test_release_build_creates_installable_assets() {
+  local listing
+
+  prepare_release_fixture
+
+  assert_file_exists "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz"
+  assert_file_exists "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz.sha256"
+  assert_file_exists "$RELEASE_FIXTURE_DIST/install.sh"
+  listing="$(tar -tzf "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz")"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/bin/agent-rails"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$RELEASE_FIXTURE_DIST" && sha256sum -c agent-rails.tar.gz.sha256 >/dev/null)
+  else
+    (cd "$RELEASE_FIXTURE_DIST" && shasum -a 256 -c agent-rails.tar.gz.sha256 >/dev/null)
+  fi
+}
+
+test_release_installer_supports_non_git_self_upgrade() {
+  local install_root="$TMP_ROOT/release-install"
+  local bin_dir="$TMP_ROOT/release-bin"
+  local current_physical home_physical output
+
+  prepare_release_fixture
+
+  output="$(AGENT_RAILS_RELEASE_BASE_URL="file://$RELEASE_FIXTURE_SERVER" \
+    bash "$ROOT_DIR/scripts/agent-release-install.sh" \
+      --version "$EXPECTED_AGENT_RAILS_VERSION" \
+      --install-root "$install_root" \
+      --bin-dir "$bin_dir")"
+
+  assert_contains "$output" "Installed Agent Rails $EXPECTED_AGENT_RAILS_VERSION"
+  assert_file_exists "$install_root/releases/$EXPECTED_AGENT_RAILS_VERSION/VERSION"
+  assert_file_contains "$install_root/release-repository" "948462448/agent-rails"
+  assert_file_contains "$install_root/release-bin-dir" "$bin_dir"
+  assert_file_not_exists "$install_root/releases/$EXPECTED_AGENT_RAILS_VERSION/.git"
+  [[ -L "$install_root/current" ]] || { printf 'Expected current to be a symlink.\n' >&2; return 1; }
+  [[ -L "$bin_dir/agent-rails" ]] || { printf 'Expected CLI entrypoint to be a symlink.\n' >&2; return 1; }
+
+  output="$("$bin_dir/agent-rails" --version)"
+  assert_contains "$output" "agent-rails $EXPECTED_AGENT_RAILS_VERSION"
+  output="$("$bin_dir/agent-rails" home)"
+  home_physical="$(cd "$output" && pwd -P)"
+  current_physical="$(cd "$install_root/current" && pwd -P)"
+  [[ "$home_physical" == "$current_physical" ]] || {
+    printf 'Expected CLI home to resolve through the current release.\n' >&2
+    return 1
+  }
+
+  output="$(AGENT_RAILS_RELEASE_BASE_URL="file://$RELEASE_FIXTURE_SERVER" \
+    "$bin_dir/agent-rails" upgrade self --version "$EXPECTED_AGENT_RAILS_VERSION" --skip-tests)"
+  assert_contains "$output" "Mode: self"
+  assert_contains "$output" "Agent Rails $EXPECTED_AGENT_RAILS_VERSION is already installed."
+  assert_not_contains "$output" "not a git repository"
+  assert_not_contains "$output" "Profile not found"
+}
+
+test_release_self_upgrade_switches_to_new_version() {
+  local install_root="$TMP_ROOT/release-upgrade-install"
+  local bin_dir="$TMP_ROOT/release-upgrade-bin"
+  local next_version="$EXPECTED_AGENT_RAILS_VERSION-next"
+  local next_workspace="$TMP_ROOT/release-next-workspace"
+  local next_release_dir="$RELEASE_FIXTURE_SERVER/releases/download/v$next_version"
+  local checksum output
+
+  prepare_release_fixture
+  AGENT_RAILS_RELEASE_BASE_URL="file://$RELEASE_FIXTURE_SERVER" \
+    bash "$ROOT_DIR/scripts/agent-release-install.sh" \
+      --version "$EXPECTED_AGENT_RAILS_VERSION" \
+      --install-root "$install_root" \
+      --bin-dir "$bin_dir" >/dev/null
+
+  mkdir -p "$next_workspace" "$next_release_dir"
+  tar -xzf "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz" -C "$next_workspace"
+  mv "$next_workspace/agent-rails-$EXPECTED_AGENT_RAILS_VERSION" \
+    "$next_workspace/agent-rails-$next_version"
+  printf '%s\n' "$next_version" > "$next_workspace/agent-rails-$next_version/VERSION"
+  tar -czf "$next_release_dir/agent-rails.tar.gz" \
+    -C "$next_workspace" "agent-rails-$next_version"
+  if command -v sha256sum >/dev/null 2>&1; then
+    checksum="$(sha256sum "$next_release_dir/agent-rails.tar.gz" | awk '{print $1}')"
+  else
+    checksum="$(shasum -a 256 "$next_release_dir/agent-rails.tar.gz" | awk '{print $1}')"
+  fi
+  printf '%s  agent-rails.tar.gz\n' "$checksum" > "$next_release_dir/agent-rails.tar.gz.sha256"
+
+  output="$(AGENT_RAILS_RELEASE_BASE_URL="file://$RELEASE_FIXTURE_SERVER" \
+    "$bin_dir/agent-rails" upgrade self --version "$next_version" --skip-tests)"
+
+  assert_contains "$output" "Installed Agent Rails $next_version"
+  assert_contains "$output" "Continue with Agent Rails $next_version"
+  assert_contains "$output" "Agent Rails update complete."
+  output="$("$bin_dir/agent-rails" --version)"
+  assert_contains "$output" "agent-rails $next_version"
+  [[ "$(readlink "$install_root/current")" == "releases/$next_version" ]] || {
+    printf 'Expected current to point at releases/%s.\n' "$next_version" >&2
+    return 1
+  }
+}
+
+test_release_installer_rejects_checksum_mismatch() {
+  local bad_server="$TMP_ROOT/release-server-bad"
+  local install_root="$TMP_ROOT/release-install-bad"
+  local bin_dir="$TMP_ROOT/release-bin-bad"
+  local release_dir="$bad_server/releases/download/v$EXPECTED_AGENT_RAILS_VERSION"
+  local output
+
+  prepare_release_fixture
+  mkdir -p "$release_dir"
+  cp "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz" \
+    "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz.sha256" \
+    "$release_dir/"
+  printf 'corrupt\n' >> "$release_dir/agent-rails.tar.gz"
+
+  if output="$(AGENT_RAILS_RELEASE_BASE_URL="file://$bad_server" \
+    bash "$ROOT_DIR/scripts/agent-release-install.sh" \
+      --version "$EXPECTED_AGENT_RAILS_VERSION" \
+      --install-root "$install_root" \
+      --bin-dir "$bin_dir" 2>&1)"; then
+    printf 'Expected release installer to reject a checksum mismatch.\n' >&2
+    return 1
+  fi
+
+  assert_contains "$output" "Checksum mismatch"
+  assert_file_not_exists "$install_root/current"
+  assert_file_not_exists "$bin_dir/agent-rails"
 }
 
 test_codex_install_and_uninstall_dry_run() {
@@ -199,7 +339,11 @@ run_core_tests() {
   run_test test_changelog_contains_version_file "changelog contains VERSION"
   run_test test_update_dry_run_sequences_project_refresh "update dry-run sequences project refresh"
   run_test test_update_falls_back_from_missing_legacy_kit_profile "update falls back from missing legacy kit profile"
-  run_test test_upgrade_self_alias_uses_update_flow "upgrade self alias uses update flow"
+  run_test test_upgrade_self_only_skips_project_refresh "upgrade self skips project refresh"
+  run_test test_release_build_creates_installable_assets "release build creates installable assets"
+  run_test test_release_installer_supports_non_git_self_upgrade "release install supports non-git self-upgrade"
+  run_test test_release_self_upgrade_switches_to_new_version "release self-upgrade switches versions"
+  run_test test_release_installer_rejects_checksum_mismatch "release installer rejects checksum mismatch"
   run_test test_codex_install_and_uninstall_dry_run "codex install/uninstall dry-run"
   run_test test_setup_claude_dry_run_uses_local_adapter_and_doctor "setup configures Claude and plans doctor"
   run_test test_setup_auto_detects_single_tool "setup auto-detects one tool"

@@ -72,6 +72,23 @@ agent-rails verify \
 
 不带项目参数的 `agent-rails init` 只打印 Shell 命令安装配置，不绑定仓库。只有显式传入 `--project` 或已有对应环境变量时，才会继续打印固定项目/Profile 的兼容配置。
 
+## 安装与自更新
+
+GitHub Release 安装默认使用以下路径：
+
+- 版本目录：`~/.local/share/agent-rails/releases/<version>`
+- 当前版本：`~/.local/share/agent-rails/current`
+- CLI 入口：`~/.local/bin/agent-rails`
+
+只更新 kit，不解析当前目录的项目或 Profile：
+
+```bash
+agent-rails upgrade self [--version VERSION] [--repository OWNER/REPO] \
+  [--install-root PATH] [--bin-dir PATH] [--skip-tests] [--dry-run]
+```
+
+`agent-rails update` 是更宽的维护流程：更新 kit 后，还会按参数运行测试、目标项目 Doctor 和 Adapter 刷新。源码 checkout 继续使用 `git pull --ff-only`；Release 安装下载归档并校验 SHA-256 后原子切换版本。`--skip-pull` 在两种安装模式下都表示跳过 kit 本身的更新。
+
 ## Profile 与项目边界
 
 Profile 解析顺序：
@@ -111,5 +128,8 @@ Managed Adapter Workspace 只刷新或删除带 Agent Rails ownership marker 的
 ## 相关设计
 
 - [Agent Rails Context](../CONTEXT.md)
+- [Agent Rails 工作原理](./how-agent-rails-works.zh-CN.md)
+- [How Agent Rails Works](./how-agent-rails-works.en.md)
 - [Local Adapters And Release Safety](./local-adapters-and-release-safety.md)
+- [GitHub Release Distribution](./github-release-distribution.md)
 - [Development Milestones](./development-milestones.md)

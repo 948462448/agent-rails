@@ -21,6 +21,7 @@ test_target_project_context_module_contract() {
 
   (
     unset PROJECT_ROOT PROJECT_NAME PROJECT_WORKTREE_SLUG TASK_PACK_PATH
+    AGENT_RAILS_HOME="$ROOT_DIR"
     # shellcheck source=scripts/agent-paths.sh
     source "$ROOT_DIR/scripts/agent-paths.sh"
     # shellcheck source=scripts/agent-target-project.sh

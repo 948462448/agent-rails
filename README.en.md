@@ -58,6 +58,13 @@ agent-rails setup
 
 You are ready to work normally.
 
+The OpenCode integration installs a project-local
+`.opencode/plugins/agent-rails.mjs`. Like Ponytail, it uses a plugin hook to
+inject a compact ruleset on every turn, so no `/agent-rails-lite` command is
+required. Focused single-area work uses a capsule capped at 1200 characters;
+only cross-area, contract, migration, and similarly broad work generates a
+Task Pack.
+
 ## Daily Use
 
 Talk to the agent as usual from inside the project. For example:
@@ -72,6 +79,7 @@ Agent Rails chooses how much project context is useful and whether the task need
 
 ```text
 AGENT RAILS: ON (...)
+AGENT RAILS: ON (mode=capsule)
 AGENT RAILS: CHECK-ONLY (...)
 AGENT RAILS: SKIPPED (...)
 ```

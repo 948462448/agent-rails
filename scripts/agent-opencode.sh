@@ -9,8 +9,8 @@ Usage: agent-rails opencode install [--project PATH] [--profile PATH] [--dry-run
        agent-rails opencode doctor [--project PATH]
        agent-rails opencode uninstall [--project PATH] [--dry-run] [--force]
 
-opencode install writes a project-local .opencode/ adapter and ignores it
-locally in git repositories. It does not modify ~/.config/opencode.
+opencode install writes a project-local .opencode/plugins/ adapter and ignores
+it locally in git repositories. It does not modify ~/.config/opencode.
 USAGE
 }
 
@@ -83,7 +83,9 @@ task_pack_path="$AGENT_TARGET_PROJECT_TASK_PACK_PATH"
 opencode_dir="$project_abs/.opencode"
 skills_dir="$opencode_dir/skills"
 commands_dir="$opencode_dir/command"
+plugins_dir="$opencode_dir/plugins"
 guide_path="$opencode_dir/AGENT_RAILS.md"
+plugin_path="$plugins_dir/agent-rails.mjs"
 pack_command_path="$commands_dir/agent-rails-pack.md"
 lite_command_path="$commands_dir/agent-rails-lite.md"
 check_command_path="$commands_dir/agent-rails-check.md"
@@ -126,69 +128,14 @@ require_python_for_config() {
   fi
 }
 
-merge_opencode_config() {
-  if [[ "$force" -ne 1 ]] && agent_adapter_workspace_is_tracked_file "$opencode_config_path"; then
-    printf 'Keeping tracked opencode config in local mode: %s\n' "$opencode_config_path"
-    if grep -Fq "$opencode_instruction_path" "$opencode_config_path" 2>/dev/null; then
-      printf '[OK] Tracked opencode config already references Agent Rails instructions.\n'
-    else
-      printf '[WARN] Add this instruction path to tracked opencode config manually: %s\n' "$opencode_instruction_path"
-    fi
-    return 0
-  fi
-
-  if [[ "$dry_run" -eq 1 ]]; then
-    if [[ -f "$opencode_config_path" ]]; then
-      printf 'Would merge Agent Rails instructions into %s\n' "$opencode_config_path"
-    else
-      printf 'Would write %s\n' "$opencode_config_path"
-    fi
-    return 0
-  fi
-
-  require_python_for_config
-  mkdir -p "$(dirname "$opencode_config_path")"
-  python3 - "$opencode_config_path" "$opencode_instruction_path" <<'PY'
-import json
-import pathlib
-import sys
-
-config_path = pathlib.Path(sys.argv[1])
-instruction_path = sys.argv[2]
-
-if config_path.exists():
-    try:
-        data = json.loads(config_path.read_text())
-    except Exception as exc:
-        raise SystemExit(
-            f"Failed to parse {config_path}: {exc}. "
-            "Fix the file first; Agent Rails will not overwrite existing opencode config."
-        )
-    if not isinstance(data, dict):
-        raise SystemExit(f"{config_path} must contain a JSON object.")
-else:
-    data = {}
-
-data.setdefault("$schema", "https://opencode.ai/config.json")
-instructions = data.setdefault("instructions", [])
-if not isinstance(instructions, list) or not all(isinstance(item, str) for item in instructions):
-    raise SystemExit(f"{config_path} field 'instructions' must be an array of strings.")
-if instruction_path not in instructions:
-    instructions.append(instruction_path)
-
-config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-PY
-  printf 'Merged Agent Rails instructions into %s\n' "$opencode_config_path"
-}
-
-remove_opencode_config_instruction() {
+remove_legacy_opencode_config_instruction() {
   [[ -f "$opencode_config_path" ]] || return 0
   if [[ "$force" -ne 1 ]] && agent_adapter_workspace_is_tracked_file "$opencode_config_path"; then
     printf 'Keeping tracked opencode config in local mode: %s\n' "$opencode_config_path"
     return 0
   fi
   if [[ "$dry_run" -eq 1 ]]; then
-    printf 'Would remove Agent Rails instructions from %s\n' "$opencode_config_path"
+    printf 'Would remove legacy Agent Rails instructions from %s\n' "$opencode_config_path"
     return 0
   fi
 
@@ -236,6 +183,14 @@ print_status() {
     printf '[WARN] opencode CLI not found.\n'
   fi
 
+  if [[ -f "$plugin_path" ]] \
+    && grep -Fq 'experimental.chat.system.transform' "$plugin_path" \
+    && grep -Fq 'AGENT_RAILS_CONTEXT_MAX_CHARS = 1200' "$plugin_path"; then
+    printf '[OK] opencode Agent Rails plugin: %s\n' "$plugin_path"
+  else
+    printf '[WARN] opencode Agent Rails plugin is missing or invalid: %s\n' "$plugin_path"
+  fi
+
   if [[ -f "$guide_path" ]] && grep -Fq 'Visible session marker protocol' "$guide_path"; then
     printf '[OK] opencode Agent Rails guide: %s\n' "$guide_path"
   else
@@ -243,9 +198,7 @@ print_status() {
   fi
 
   if [[ -f "$opencode_config_path" ]] && grep -Fq "$opencode_instruction_path" "$opencode_config_path"; then
-    printf '[OK] opencode config loads Agent Rails instructions: %s\n' "$opencode_config_path"
-  else
-    printf '[WARN] opencode config does not load Agent Rails instructions: %s\n' "$opencode_config_path"
+    printf '[WARN] legacy opencode instructions still load the long Agent Rails guide: %s\n' "$opencode_config_path"
   fi
 
   for command_path in "$pack_command_path" "$lite_command_path" "$check_command_path"; do
@@ -259,6 +212,7 @@ print_status() {
 
 agent_adapter_content_init opencode "$AGENT_RAILS_VERSION" "$AGENT_RAILS_BIN" "$profile_path"
 guide_content="$(agent_adapter_content_render guide)"
+plugin_content="$(agent_adapter_content_render plugin)"
 pack_command_content="$(agent_adapter_content_render pack)"
 lite_command_content="$(agent_adapter_content_render lite)"
 check_command_content="$(agent_adapter_content_render check)"
@@ -270,11 +224,12 @@ case "$subcommand" in
     printf 'Project: %s\n' "$project_abs"
     printf 'Profile: %s\n' "$profile_path"
     agent_adapter_workspace_install_skills
+    agent_adapter_workspace_write_generated_file "$plugin_path" "$plugin_content"
     agent_adapter_workspace_write_generated_file "$guide_path" "$guide_content"
     agent_adapter_workspace_write_generated_file "$pack_command_path" "$pack_command_content"
     agent_adapter_workspace_write_generated_file "$lite_command_path" "$lite_command_content"
     agent_adapter_workspace_write_generated_file "$check_command_path" "$check_command_content"
-    merge_opencode_config
+    remove_legacy_opencode_config_instruction
     agent_adapter_workspace_write_managed_skills
     agent_adapter_workspace_ensure_ignore_block \
       "$local_ignore_path" \
@@ -283,6 +238,7 @@ case "$subcommand" in
       ".opencode/AGENT_RAILS.md" \
       ".opencode/.agent-rails-managed-skills" \
       ".opencode/opencode.json" \
+      ".opencode/plugins/agent-rails.mjs" \
       ".opencode/command/agent-rails-pack.md" \
       ".opencode/command/agent-rails-lite.md" \
       ".opencode/command/agent-rails-check.md" \
@@ -299,7 +255,8 @@ case "$subcommand" in
     ;;
   uninstall)
     printf 'Agent Rails opencode Uninstall\n'
-    remove_opencode_config_instruction
+    remove_legacy_opencode_config_instruction
+    agent_adapter_workspace_remove_generated_file "$plugin_path"
     agent_adapter_workspace_remove_generated_file "$guide_path"
     agent_adapter_workspace_remove_generated_file "$pack_command_path"
     agent_adapter_workspace_remove_generated_file "$lite_command_path"
@@ -315,13 +272,14 @@ case "$subcommand" in
       ".opencode/AGENT_RAILS.md" \
       ".opencode/.agent-rails-managed-skills" \
       ".opencode/opencode.json" \
+      ".opencode/plugins/agent-rails.mjs" \
       ".opencode/command/agent-rails-pack.md" \
       ".opencode/command/agent-rails-lite.md" \
       ".opencode/command/agent-rails-check.md" \
       ".opencode/skills/agent-*/" \
       ".agent-rails/"
     if [[ "$dry_run" -ne 1 ]]; then
-      rmdir "$commands_dir" "$skills_dir" "$opencode_dir" 2>/dev/null || true
+      rmdir "$commands_dir" "$plugins_dir" "$skills_dir" "$opencode_dir" 2>/dev/null || true
     fi
     ;;
   --help|-h)

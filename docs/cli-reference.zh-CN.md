@@ -21,7 +21,9 @@ agent-rails setup \
 - 多工具环境必须显式选择；`all` 表示明确接受全部个人安装。
 - Claude 使用 local mode，默认安装 SessionStart hook。
 - Codex 复用已有 plugin 安装和 project repair 流程。
-- OpenCode 只写项目本地 Adapter，不修改全局 OpenCode 配置。
+- OpenCode 只写项目本地 Adapter，不修改全局 OpenCode 配置；
+  `.opencode/plugins/agent-rails.mjs` 会自动加载并在每轮注入不超过 1200 字符的
+  capsule，聚焦任务不再要求手工执行斜杠命令或读取完整 Task Pack。
 
 ### `run`
 

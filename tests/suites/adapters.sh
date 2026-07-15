@@ -17,7 +17,11 @@ test_opencode_install_doctor_and_uninstall() {
   assert_contains "$output" "Agent Rails opencode Install"
   assert_contains "$output" "opencode adapter ready"
   assert_contains "$output" "Restart opencode"
-  assert_file_contains "$repo/.opencode/opencode.json" "\"$repo_abs/.opencode/AGENT_RAILS.md\""
+  assert_file_not_exists "$repo/.opencode/opencode.json"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "experimental.chat.system.transform"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "AGENT_RAILS_CONTEXT_MAX_CHARS = 1200"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "capsule-only"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "AGENT RAILS: ON (mode=capsule)"
   assert_file_contains "$repo/.opencode/AGENT_RAILS.md" "Visible session marker protocol"
   assert_file_contains "$repo/.opencode/command/agent-rails-pack.md" '$ARGUMENTS'
   assert_file_contains "$repo/.opencode/command/agent-rails-lite.md" "--pack-mode lite"
@@ -29,24 +33,53 @@ test_opencode_install_doctor_and_uninstall() {
     /*) ;;
     *) exclude_path="$repo/$exclude_path" ;;
   esac
-  assert_file_contains "$exclude_path" ".opencode/opencode.json"
+  assert_file_contains "$exclude_path" ".opencode/plugins/agent-rails.mjs"
   assert_file_contains "$exclude_path" ".opencode/skills/agent-*/"
+
+  if command -v node >/dev/null 2>&1; then
+    node --input-type=module - "$repo/.opencode/plugins/agent-rails.mjs" <<'JS'
+import { pathToFileURL } from "node:url";
+
+delete process.env.AGENT_RAILS_OPENCODE;
+const pluginModule = await import(pathToFileURL(process.argv[2]));
+const hooks = await pluginModule.default({});
+const transform = hooks["experimental.chat.system.transform"];
+const output = { system: ["base"] };
+await transform({}, output);
+const combined = output.system.at(-1);
+const injected = combined.slice("base\n\n".length);
+if (!injected.includes("AGENT RAILS SESSION HOOK ACTIVE")) {
+  throw new Error("Agent Rails marker was not injected");
+}
+if (injected.length > pluginModule.AGENT_RAILS_CONTEXT_MAX_CHARS) {
+  throw new Error(`Agent Rails context exceeded cap: ${injected.length}`);
+}
+if (!injected.endsWith("Keep repository reads, injected context, and responses minimal.")) {
+  throw new Error("Agent Rails context was truncated before its final rule");
+}
+await transform({}, output);
+if (output.system.join("\n").split("AGENT RAILS SESSION HOOK ACTIVE").length !== 2) {
+  throw new Error("Agent Rails marker was injected more than once");
+}
+JS
+  fi
 
   output="$("$AGENT_RAILS_BIN" opencode doctor --project "$repo")"
   assert_contains "$output" "Agent Rails opencode Doctor"
+  assert_contains "$output" "[OK] opencode Agent Rails plugin"
   assert_contains "$output" "[OK] opencode Agent Rails guide"
-  assert_contains "$output" "[OK] opencode config loads Agent Rails instructions"
 
   mkdir -p "$repo/.opencode/skills/agent-custom"
   printf 'user-owned\n' > "$repo/.opencode/skills/agent-custom/SKILL.md"
 
   output="$("$AGENT_RAILS_BIN" opencode uninstall --project "$repo" --dry-run)"
   assert_contains "$output" "Agent Rails opencode Uninstall"
-  assert_contains "$output" "Would remove Agent Rails instructions"
+  assert_contains "$output" "Would remove $repo_abs/.opencode/plugins/agent-rails.mjs"
   assert_contains "$output" "Would remove $repo_abs/.opencode/AGENT_RAILS.md"
 
   "$AGENT_RAILS_BIN" opencode uninstall --project "$repo" >/dev/null
   assert_file_not_exists "$repo/.opencode/opencode.json"
+  assert_file_not_exists "$repo/.opencode/plugins/agent-rails.mjs"
   assert_file_not_exists "$repo/.opencode/AGENT_RAILS.md"
   assert_file_not_exists "$repo/.opencode/command/agent-rails-pack.md"
   assert_file_not_exists "$repo/.opencode/skills/agent-context-pack"
@@ -199,6 +232,10 @@ test_adapter_content_module_contract() {
   agent_adapter_content_init opencode "9.9.9" "/kit/bin/agent-rails" "/profiles/demo.profile"
   output="$(agent_adapter_content_render guide)"
   assert_contains "$output" "local opencode adapter"
+  output="$(agent_adapter_content_render plugin)"
+  assert_contains "$output" "experimental.chat.system.transform"
+  assert_contains "$output" "AGENT_RAILS_CONTEXT_MAX_CHARS = 1200"
+  assert_contains "$output" "capsule-only"
   output="$(agent_adapter_content_render check)"
   assert_contains "$output" "agent: build"
   assert_not_contains "$output" "argument-hint:"
@@ -272,7 +309,9 @@ test_adapter_install_preserves_unmanaged_generated_paths() {
 
 test_opencode_migrates_legacy_adapter_to_managed_inventory() {
   local repo="$TMP_ROOT/opencode-legacy-inventory"
+  local repo_abs
   mkdir -p "$repo/.opencode/skills/agent-context-pack" "$repo/.opencode/skills/agent-custom"
+  repo_abs="$(cd "$repo" && pwd -P)"
   git -C "$repo" init -q
   printf '# temp\n' > "$repo/README.md"
   {
@@ -280,6 +319,8 @@ test_opencode_migrates_legacy_adapter_to_managed_inventory() {
     printf 'Agent Rails Version: 0.5.1\n\n'
     printf 'Visible session marker protocol\n'
   } > "$repo/.opencode/AGENT_RAILS.md"
+  printf '{"$schema":"https://opencode.ai/config.json","instructions":["%s/.opencode/AGENT_RAILS.md"]}\n' \
+    "$repo_abs" > "$repo/.opencode/opencode.json"
   printf 'legacy-managed-skill\n' > "$repo/.opencode/skills/agent-context-pack/SKILL.md"
   printf 'legacy-user-skill\n' > "$repo/.opencode/skills/agent-custom/SKILL.md"
   git -C "$repo" add README.md
@@ -288,6 +329,8 @@ test_opencode_migrates_legacy_adapter_to_managed_inventory() {
   "$AGENT_RAILS_BIN" opencode install --project "$repo" >/dev/null
   assert_file_contains "$repo/.opencode/.agent-rails-managed-skills" "agent-context-pack"
   assert_file_not_contains "$repo/.opencode/skills/agent-context-pack/SKILL.md" "legacy-managed-skill"
+  assert_file_not_exists "$repo/.opencode/opencode.json"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "experimental.chat.system.transform"
 
   "$AGENT_RAILS_BIN" opencode uninstall --project "$repo" >/dev/null
   assert_file_not_exists "$repo/.opencode/skills/agent-context-pack"

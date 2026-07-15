@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render generated Agent Rails guides and commands for local tool adapters.
+# Render generated Agent Rails guides, commands, and plugins for local tool adapters.
 
 _agent_adapter_content_adapter=""
 _agent_adapter_content_version=""
@@ -50,6 +50,13 @@ agent_adapter_content_render() {
       ;;
     pack|lite|check)
       _agent_adapter_content_render_command "$artifact"
+      ;;
+    plugin)
+      if [[ "$_agent_adapter_content_adapter" != "opencode" ]]; then
+        printf 'Plugin content is only available for the opencode adapter.\n' >&2
+        return 2
+      fi
+      _agent_adapter_content_render_opencode_plugin
       ;;
     *)
       printf 'Unknown Agent Rails adapter artifact: %s\n' "$artifact" >&2
@@ -173,6 +180,78 @@ $_agent_adapter_content_bin check --project "\$project_root" --profile "$_agent_
 \`\`\`
 
 For deploy/release/upload workflows that consume the current branch, treat that check command as Step 0.
+EOF
+}
+
+_agent_adapter_content_json_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '"%s"' "$value"
+}
+
+_agent_adapter_content_render_opencode_plugin() {
+  local bin_json profile_json
+  bin_json="$(_agent_adapter_content_json_string "$_agent_adapter_content_bin")"
+  profile_json="$(_agent_adapter_content_json_string "$_agent_adapter_content_profile")"
+
+  cat <<EOF
+// <!-- agent-rails:generated -->
+// Agent Rails OpenCode plugin. Loaded automatically from .opencode/plugins/.
+
+export const AGENT_RAILS_CONTEXT_MAX_CHARS = 1200;
+export const AGENT_RAILS_CONTEXT_MARKER = "AGENT RAILS SESSION HOOK ACTIVE";
+
+const agentRailsBin = $bin_json;
+const profilePath = $profile_json;
+
+function shellDoubleQuote(value) {
+  return '"' + value
+    .replaceAll('\\\\', '\\\\\\\\')
+    .replaceAll('"', '\\"')
+    .replaceAll(String.fromCharCode(36), '\\\\' + String.fromCharCode(36))
+    .replaceAll(String.fromCharCode(96), '\\\\' + String.fromCharCode(96)) + '"';
+}
+
+export function buildAgentRailsContext() {
+  const command = [
+    shellDoubleQuote(agentRailsBin),
+    'pack --project "\$project_root" --profile',
+    shellDoubleQuote(profilePath),
+    '[--pack-mode lite] "<current goal>"',
+  ].join(' ');
+  const context = [
+    AGENT_RAILS_CONTEXT_MARKER,
+    'Default: capsule-only for focused single-area edits; show AGENT RAILS: ON (mode=capsule) and do not generate a Task Pack.',
+    'Pack only when needed: deep=2+ subprojects, API/contract/schema/model, ADR, migration/refactor, or ambiguous product work; lite=POC, deploy prep, codegen check, or focused continuation.',
+    'Check-only for branch-consuming release/deploy/upload. Skip pack for read-only or fixed operations.',
+    'Before broad reads/edits choose the smallest path and show its marker: pack output AGENT RAILS: ON; or AGENT RAILS: CHECK-ONLY (reason=...); or AGENT RAILS: SKIPPED (reason=...).',
+    'Pack: project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; ' + command + '. Read the generated pack before continuing.',
+    'Scope: use the exact worktree; sibling repositories must resolve their own profile.',
+    'Sensitive output: keep only decision fields; base64 and URL encoding are not redaction.',
+    'Keep repository reads, injected context, and responses minimal.',
+  ].join('\n');
+  return context.slice(0, AGENT_RAILS_CONTEXT_MAX_CHARS);
+}
+
+export default async () => ({
+  'experimental.chat.system.transform': async (_input, output) => {
+    const mode = String(process.env.AGENT_RAILS_OPENCODE || 'on').trim().toLowerCase();
+    if (mode === 'off' || mode === 'false' || mode === '0') return;
+    if (!output || !Array.isArray(output.system)) return;
+    if (output.system.some((part) => typeof part === 'string' && part.includes(AGENT_RAILS_CONTEXT_MARKER))) return;
+
+    const context = buildAgentRailsContext();
+    if (output.system.length > 0) {
+      output.system[output.system.length - 1] += '\n\n' + context;
+    } else {
+      output.system.push(context);
+    }
+  },
+});
 EOF
 }
 

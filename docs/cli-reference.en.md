@@ -21,7 +21,10 @@ agent-rails setup \
 - Multiple tools require an explicit choice; `all` means every personal install is intentional.
 - Claude uses local mode and enables the SessionStart hook by default.
 - Codex reuses the existing plugin install and project-repair flow.
-- OpenCode writes only its project-local adapter and does not modify global OpenCode configuration.
+- OpenCode writes only its project-local adapter and does not modify global
+  OpenCode configuration. `.opencode/plugins/agent-rails.mjs` is auto-loaded
+  and injects a capsule capped at 1200 characters on every turn, so focused
+  work requires neither a slash command nor a full Task Pack.
 
 ### `run`
 

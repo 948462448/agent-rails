@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Replaced OpenCode's long-guide `instructions` integration with an auto-loaded project plugin modeled on Ponytail's `experimental.chat.system.transform` pattern; focused work now uses a deduplicated capsule capped at 1200 characters, while legacy instruction entries are removed during upgrade.
 - Added `agent-rails setup` and `agent-rails verify` as compatible user-journey facades over the existing adapter, Doctor, Agent Check, and publish-check commands.
 - Reduced the bilingual README path to setup, run, and verify, moving customization and troubleshooting details into bilingual CLI reference documents.
 - Made plain `agent-rails init` project-neutral so first-time shell setup no longer pins one repository or prints the advanced workflow; explicit `--project` and `--profile` remain compatible.

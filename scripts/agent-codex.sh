@@ -5,13 +5,14 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails codex install [--project PATH] [--profile PATH] [--fix-project] [--dry-run]
+Usage: agent-rails codex install [--project PATH] [--profile PATH] [--fix-project] [--mode local|project] [--dry-run]
        agent-rails codex doctor [--project PATH]
        agent-rails codex uninstall [--dry-run]
 
 Codex install registers the repo-local Agent Rails marketplace and installs
 agent-rails@agent-rails-local. Project marker/adapter refresh is explicit via
---fix-project so business repositories are not changed by surprise.
+--fix-project so business repositories are not changed by surprise. Adapter mode
+defaults to local; project mode makes the generated marker files committable.
 USAGE
 }
 
@@ -34,6 +35,8 @@ shift || true
 project=""
 profile_path=""
 fix_project=0
+install_mode="local"
+install_mode_explicit=0
 dry_run=0
 
 while [[ $# -gt 0 ]]; do
@@ -52,6 +55,15 @@ while [[ $# -gt 0 ]]; do
       fix_project=1
       shift
       ;;
+    --mode)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      case "$2" in
+        local|project) install_mode="$2" ;;
+        *) usage >&2; exit 2 ;;
+      esac
+      install_mode_explicit=1
+      shift 2
+      ;;
     --dry-run)
       dry_run=1
       shift
@@ -66,6 +78,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$subcommand" != "install" && "$install_mode_explicit" -eq 1 ]]; then
+  printf '%s\n' '--mode is only supported by agent-rails codex install.' >&2
+  exit 2
+fi
 
 print_command() {
   local first=1 arg
@@ -135,11 +152,12 @@ case "$subcommand" in
     printf 'Version: %s\n' "$AGENT_RAILS_VERSION"
     printf 'Marketplace: %s\n' "$marketplace_path"
     printf 'Plugin: %s\n' "$plugin_selector"
+    printf 'Mode: %s\n' "$install_mode"
     run_or_print codex plugin marketplace add "$marketplace_path"
     run_or_print codex plugin add "$plugin_selector"
     if [[ "$fix_project" -eq 1 ]]; then
       [[ -n "${project_abs:-}" ]] || { printf '%s\n' '--fix-project requires --project.' >&2; exit 2; }
-      fix_args=(doctor --project "$project_abs" --fix)
+      fix_args=(doctor --project "$project_abs" --fix --mode "$install_mode")
       [[ -n "$profile_path" ]] && fix_args+=(--profile "$profile_path")
       run_or_print "$AGENT_RAILS_BIN" "${fix_args[@]}"
     else

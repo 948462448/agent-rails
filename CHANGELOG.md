@@ -11,6 +11,8 @@
 - Fixed `agent-rails update` in GitHub Release installations so it no longer runs the source-checkout-only test suite after a checksum-verified update.
 - Added regression coverage for Release update behavior and a GitHub Actions smoke test that executes the CLI directly from the built archive.
 - Unified project maintenance as `update --tool claude|codex|opencode`; each tool now uses its own install and Doctor path, and omitting `--tool` no longer defaults to Claude.
+- Unified `--mode local|project` across setup and all three Adapter refresh paths. Local remains the collaborator-safe default; project mode removes managed local ignores and renders portable, committable Adapter files without personal absolute paths.
+- Made the bundled Codex SessionStart wrapper and installed skill guidance location-independent for GitHub Release installs and project-mode promotion.
 
 ## 0.6.0 - 2026-07-15
 

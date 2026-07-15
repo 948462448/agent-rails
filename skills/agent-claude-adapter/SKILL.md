@@ -16,7 +16,7 @@ Use this skill to install Agent Rails into a Claude Code project.
 agent-rails claude install --project /path/to/project --profile /path/to/profile --dry-run
 ```
 
-If `agent-rails` is not on PATH, run `/Users/songlei/workspace/agent-rails/bin/agent-rails`.
+Project-mode adapters expect `agent-rails` on PATH. Local adapters may use the absolute CLI path generated for that machine.
 
 3. Install project-local adapter files:
 

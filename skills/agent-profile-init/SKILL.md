@@ -16,7 +16,7 @@ Use this skill to create a user-level profile for a target project. Use project 
 agent-rails profile init --project /path/to/project --print-only
 ```
 
-If `agent-rails` is not on PATH, run `/Users/songlei/workspace/agent-rails/bin/agent-rails`.
+Project-mode adapters expect `agent-rails` on PATH. Local adapters may use the absolute CLI path generated for that machine.
 
 3. Check that the profile:
    - sources `profiles/default.profile`

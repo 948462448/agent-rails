@@ -62,6 +62,7 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Stopped checksum-verified Release installations from running the source-checkout-only test suite during `upgrade self` and project updates.
 - Added a built-archive smoke gate to the tag-driven Release workflow.
 - Unified project maintenance as `update --tool claude|codex|opencode`, with tool-specific install and Doctor dispatch and no implicit Claude default.
+- Unified collaborator-safe `local` and portable, committable `project` Adapter modes across Claude, Codex, OpenCode, setup, and update.
 
 ## Near-Term Backlog
 

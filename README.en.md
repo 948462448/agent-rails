@@ -45,7 +45,15 @@ cd /path/to/your-project
 agent-rails setup --tool codex
 ```
 
-Replace `codex` with `claude` or `opencode` as needed. Add `--dry-run` to preview the changes first.
+Replace `codex` with `claude` or `opencode` as needed. Add `--dry-run` to preview the changes first. The default `--mode local` keeps Adapter files inside the project but hides them with a local Git exclude, so collaborators are not required to install Agent Rails.
+
+After the evaluation proves useful and the team is ready to adopt it, promote the Adapter explicitly:
+
+```bash
+agent-rails setup --tool codex --mode project
+```
+
+Project mode removes the Agent Rails-managed local-ignore block and writes portable, committable files without personal absolute paths. Review the diff before committing them.
 
 If only one supported tool is installed, this is enough:
 
@@ -143,7 +151,7 @@ Run it from the target repository root or any subdirectory; Agent Rails resolves
 
 ### Will it pollute the business repository?
 
-Personal integrations use local ignores by default and preserve tracked or user-authored same-path files. Agent Rails never commits, pushes, or releases on your behalf.
+Personal integrations default to `--mode local` and preserve tracked or user-authored same-path files. Only explicit `--mode project` makes managed Adapter files visible to Git. Agent Rails still never commits, pushes, or releases on your behalf.
 
 ## Privacy and Safety
 

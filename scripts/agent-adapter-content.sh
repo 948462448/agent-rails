@@ -59,6 +59,9 @@ agent_adapter_content_render() {
 }
 
 _agent_adapter_content_render_claude_guide() {
+  local profile_arg=""
+  [[ -n "$_agent_adapter_content_profile" ]] \
+    && profile_arg=" --profile \"$_agent_adapter_content_profile\""
   cat <<EOF
 <!-- agent-rails:generated -->
 # Agent Rails
@@ -84,14 +87,14 @@ Generate and read a Task Pack when the matrix says pack:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin pack --project "\$project_root" --profile "$_agent_adapter_content_profile" "<goal>"
+$_agent_adapter_content_bin pack --project "\$project_root"$profile_arg "<goal>"
 \`\`\`
 
 For lite POC/deploy-prep work:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin pack --project "\$project_root" --profile "$_agent_adapter_content_profile" --pack-mode lite "<goal>"
+$_agent_adapter_content_bin pack --project "\$project_root"$profile_arg --pack-mode lite "<goal>"
 \`\`\`
 
 Task Pack path is worktree-specific. Read the path printed by the pack command, not a stale pack from another worktree.
@@ -110,20 +113,20 @@ Use the Grill Gate before architecture, refactor, migration, API contract, data 
 
 When delegating to a subagent, require the subagent to return the Subagent Result Contract from the Task Pack.
 
-Use \`project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; $_agent_adapter_content_bin check --project "\$project_root" --profile "$_agent_adapter_content_profile" --print-only\` before final delivery, and as Step 0 for deploy/release/upload workflows that consume this branch.
+Use \`project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; $_agent_adapter_content_bin check --project "\$project_root"$profile_arg --print-only\` before final delivery, and as Step 0 for deploy/release/upload workflows that consume this branch.
 
 After delivery, use \`agent-memory-curator\` to decide whether this task produced reusable memory. If not, record a skip reason:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin memory suggest --project "\$project_root" --profile "$_agent_adapter_content_profile" --decision skip --reason "<why no durable memory>"
+$_agent_adapter_content_bin memory suggest --project "\$project_root"$profile_arg --decision skip --reason "<why no durable memory>"
 \`\`\`
 
 If the lesson is durable, write one small local card:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin memory suggest --project "\$project_root" --profile "$_agent_adapter_content_profile" --decision keep --write-local --title "<short title>" --trigger "<trigger>" --applies-to "<scope>" --verify "<check>" --caution "<scope limits>" "<brief reusable lesson>"
+$_agent_adapter_content_bin memory suggest --project "\$project_root"$profile_arg --decision keep --write-local --title "<short title>" --trigger "<trigger>" --applies-to "<scope>" --verify "<check>" --caution "<scope limits>" "<brief reusable lesson>"
 \`\`\`
 
 Do not write OpenMemory from this kit. Online memory is a read provider unless a separate integration is explicitly added.
@@ -131,6 +134,9 @@ EOF
 }
 
 _agent_adapter_content_render_opencode_guide() {
+  local profile_arg=""
+  [[ -n "$_agent_adapter_content_profile" ]] \
+    && profile_arg=" --profile \"$_agent_adapter_content_profile\""
   cat <<EOF
 <!-- agent-rails:generated -->
 ## Agent Rails
@@ -149,14 +155,14 @@ Generate the Task Pack:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin pack --project "\$project_root" --profile "$_agent_adapter_content_profile" "<goal>"
+$_agent_adapter_content_bin pack --project "\$project_root"$profile_arg "<goal>"
 \`\`\`
 
 For lite mode:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin pack --project "\$project_root" --profile "$_agent_adapter_content_profile" --pack-mode lite "<goal>"
+$_agent_adapter_content_bin pack --project "\$project_root"$profile_arg --pack-mode lite "<goal>"
 \`\`\`
 
 Read the generated Task Pack path printed by the command. Do not reuse a pack generated for another worktree.
@@ -169,7 +175,7 @@ Before final delivery, print verification suggestions:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin check --project "\$project_root" --profile "$_agent_adapter_content_profile" --print-only
+$_agent_adapter_content_bin check --project "\$project_root"$profile_arg --print-only
 \`\`\`
 
 For deploy/release/upload workflows that consume the current branch, treat that check command as Step 0.
@@ -178,7 +184,9 @@ EOF
 
 _agent_adapter_content_render_command() {
   local artifact="$1"
-  local description metadata
+  local description metadata profile_arg=""
+  [[ -n "$_agent_adapter_content_profile" ]] \
+    && profile_arg=" --profile \"$_agent_adapter_content_profile\""
 
   case "$_agent_adapter_content_adapter:$artifact" in
     claude:pack)
@@ -224,7 +232,7 @@ EOF
       cat <<EOF
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin pack --project "\$project_root" --profile "$_agent_adapter_content_profile" "\$ARGUMENTS"
+$_agent_adapter_content_bin pack --project "\$project_root"$profile_arg "\$ARGUMENTS"
 \`\`\`
 
 Then read the Task Pack path printed by the command. Do not reuse a pack generated for another worktree.
@@ -238,7 +246,7 @@ EOF
       cat <<EOF
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin pack --project "\$project_root" --profile "$_agent_adapter_content_profile" --pack-mode lite "\$ARGUMENTS"
+$_agent_adapter_content_bin pack --project "\$project_root"$profile_arg --pack-mode lite "\$ARGUMENTS"
 \`\`\`
 
 Then read the Task Pack path printed by the command. Do not reuse a pack generated for another worktree.
@@ -252,7 +260,7 @@ EOF
       cat <<EOF
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$_agent_adapter_content_bin check --project "\$project_root" --profile "$_agent_adapter_content_profile" --print-only \$ARGUMENTS
+$_agent_adapter_content_bin check --project "\$project_root"$profile_arg --print-only \$ARGUMENTS
 \`\`\`
 
 Before continuing, tell the user:

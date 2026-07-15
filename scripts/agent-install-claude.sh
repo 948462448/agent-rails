@@ -257,6 +257,31 @@ write_claude_md_block() {
   printf 'Appended Agent Rails block to %s\n' "$claude_md_path"
 }
 
+remove_stale_local_agent_rails_block() {
+  local path="$claude_local_md_path"
+  local tmp_file
+  [[ -f "$path" ]] || return 0
+  grep -Fq '<!-- agent-rails:start -->' "$path" || return 0
+  if [[ "$dry_run" -eq 1 ]]; then
+    printf 'Would remove local Agent Rails block from %s\n' "$path"
+    return 0
+  fi
+
+  tmp_file="$(mktemp)"
+  awk '
+    /^<!-- agent-rails:start -->$/ { in_block = 1; next }
+    /^<!-- agent-rails:end -->$/ && in_block { in_block = 0; next }
+    !in_block { print }
+  ' "$path" > "$tmp_file"
+  if grep -q '[^[:space:]]' "$tmp_file"; then
+    mv "$tmp_file" "$path"
+    printf 'Removed local Agent Rails block from %s\n' "$path"
+  else
+    rm -f "$tmp_file" "$path"
+    printf 'Removed empty %s\n' "$path"
+  fi
+}
+
 write_global_reminder_block() {
   local claude_md_path="$claude_user_md_path"
   local marker='<!-- agent-rails:global-reminder:start -->'
@@ -340,7 +365,16 @@ write_session_hook_settings() {
   python3 "$session_hook_settings_script" "${args[@]}"
 }
 
-agent_adapter_content_init claude "$AGENT_RAILS_VERSION" "$AGENT_RAILS_BIN" "$profile_path"
+adapter_content_bin="$AGENT_RAILS_BIN"
+adapter_content_profile="$profile_path"
+if [[ "$install_mode" == "project" ]]; then
+  adapter_content_bin="agent-rails"
+  adapter_content_profile=""
+fi
+adapter_profile_arg=""
+[[ -n "$adapter_content_profile" ]] \
+  && adapter_profile_arg=" --profile \"$adapter_content_profile\""
+agent_adapter_content_init claude "$AGENT_RAILS_VERSION" "$adapter_content_bin" "$adapter_content_profile"
 guide_content="$(agent_adapter_content_render guide)"
 pack_command_content="$(agent_adapter_content_render pack)"
 lite_command_content="$(agent_adapter_content_render lite)"
@@ -364,14 +398,14 @@ Visible session marker protocol:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$profile_path" "<goal>"
+$adapter_content_bin pack --project "\$project_root"$adapter_profile_arg "<goal>"
 \`\`\`
 
    For POCs, quick prototypes, version/Dockerfile/OSS/deploy prep, codegen freshness checks, or continuation from an existing handbook, use:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$profile_path" --pack-mode lite "<goal>"
+$adapter_content_bin pack --project "\$project_root"$adapter_profile_arg --pack-mode lite "<goal>"
 \`\`\`
 
 2. Read the generated Task Pack path printed by the command. Do not reuse a pack generated for another worktree.
@@ -386,7 +420,7 @@ Before final delivery, print verification suggestions:
 
 \`\`\`bash
 project_root="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-$AGENT_RAILS_BIN check --project "\$project_root" --profile "$profile_path" --print-only
+$adapter_content_bin check --project "\$project_root"$adapter_profile_arg --print-only
 \`\`\`
 
 For deploy/release/upload workflows that consume the current branch, treat that check command as Step 0.
@@ -429,6 +463,9 @@ agent_adapter_workspace_write_generated_file "$guide_path" "$guide_content"
 agent_adapter_workspace_write_generated_file "$pack_command_path" "$pack_command_content"
 agent_adapter_workspace_write_generated_file "$lite_command_path" "$lite_command_content"
 agent_adapter_workspace_write_generated_file "$check_command_path" "$check_command_content"
+if [[ "$install_mode" == "project" ]]; then
+  remove_stale_local_agent_rails_block
+fi
 write_claude_md_block
 
 if [[ "$global_reminder" -eq 1 ]]; then
@@ -455,6 +492,23 @@ if [[ "$install_mode" == "local" ]]; then
     --cleanup-only \
     ".claude/" \
     "CLAUDE.md"
+else
+  agent_adapter_workspace_remove_ignore_block \
+    "$local_ignore_path" \
+    "# Agent Rails local adapter" \
+    "# Agent Rails local adapter end" \
+    "Would remove Agent Rails local ignore block from" \
+    "Removed Agent Rails local ignore block from" \
+    ".claude/" \
+    ".claude/AGENT_RAILS.md" \
+    ".claude/.agent-rails-managed-skills" \
+    ".claude/commands/agent-rails-pack.md" \
+    ".claude/commands/agent-rails-lite.md" \
+    ".claude/commands/agent-rails-check.md" \
+    ".claude/skills/agent-*/" \
+    ".agent-rails/" \
+    "CLAUDE.md" \
+    "CLAUDE.local.md"
 fi
 
 printf '\nClaude adapter ready.\n'

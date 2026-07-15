@@ -3,5 +3,6 @@
 
 set -euo pipefail
 
-AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-/Users/songlei/workspace/agent-rails}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_RAILS_HOME="${AGENT_RAILS_HOME:-$(cd "$script_dir/../../../.." && pwd)}"
 exec "$AGENT_RAILS_HOME/hooks/agent-rails-session-start.sh"

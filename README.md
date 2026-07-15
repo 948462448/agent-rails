@@ -45,7 +45,15 @@ cd /path/to/your-project
 agent-rails setup --tool codex
 ```
 
-把 `codex` 换成 `claude` 或 `opencode` 即可。想先看看会做什么，可以加 `--dry-run`。
+把 `codex` 换成 `claude` 或 `opencode` 即可。想先看看会做什么，可以加 `--dry-run`。默认的 `--mode local` 会把 Adapter 留在当前项目目录，但通过本地 Git exclude 隐藏，因此不会要求其他协作者安装 Agent Rails。
+
+评测有效、准备推广给团队时，再显式提升为可提交的项目模式：
+
+```bash
+agent-rails setup --tool codex --mode project
+```
+
+project 模式会移除 Agent Rails 管理的本地忽略块，并生成不含个人绝对路径的可提交文件；提交前仍应检查 diff。
 
 如果本机只安装了一个受支持工具，也可以直接运行：
 
@@ -143,7 +151,7 @@ agent-rails update --tool opencode
 
 ### 会不会污染业务仓库
 
-个人接入默认写入本地忽略区域，并保护已经被 Git 跟踪或由你自己创建的同路径文件。Agent Rails 不会替你提交、推送或发布。
+个人接入默认使用 `--mode local` 写入本地忽略区域，并保护已经被 Git 跟踪或由你自己创建的同路径文件。只有显式使用 `--mode project` 才会让受管 Adapter 文件出现在 Git 状态中；Agent Rails 仍不会替你提交、推送或发布。
 
 ## 隐私与安全
 

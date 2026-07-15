@@ -16,7 +16,7 @@ Use this skill to narrow context before work begins.
 agent-rails pack "<goal>"
 ```
 
-Use `--profile <path>` when the project does not use the default profile. If `agent-rails` is not on PATH, run `/Users/songlei/workspace/agent-rails/bin/agent-rails`.
+Use `--profile <path>` when the project does not use the default profile. Project-mode adapters expect `agent-rails` on PATH; local adapters may use the absolute CLI path generated for that machine.
 Use `--budget <chars>` when the pack should be bounded by an approximate character budget.
 Use `--model qwen3.7-max|glm5.1|deepseek-v4-pro --pack-mode lite|normal|deep|audit` to select a built-in model budget preset.
 Use `--pack-mode lite` for POCs, quick prototypes, version/Dockerfile/OSS/deploy prep, codegen freshness checks, or continuation from an existing handbook where full grill is too heavy.

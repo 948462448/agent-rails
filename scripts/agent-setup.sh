@@ -5,14 +5,16 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails setup [--project PATH] [--profile PATH] [--tool auto|claude|codex|opencode|all] [--no-session-hook] [--dry-run]
+Usage: agent-rails setup [--project PATH] [--profile PATH] [--tool auto|claude|codex|opencode|all] [--mode local|project] [--no-session-hook] [--dry-run]
 
 With --tool auto, setup proceeds only when exactly one supported coding-agent
 CLI is detected. Choose --tool explicitly when multiple tools are installed;
 use --tool all only when every supported integration is intentionally wanted.
 
-Claude setup uses local mode and enables the personal SessionStart hook by
-default. Pass --no-session-hook to install only the project-local adapter.
+Adapter mode defaults to local, which keeps generated files out of Git. Project
+mode makes generated Adapter files visible for intentional team adoption.
+Claude enables the personal SessionStart hook by default; pass --no-session-hook
+to install only its project-local Adapter files.
 USAGE
 }
 
@@ -28,6 +30,7 @@ agent_rails_init_paths
 project="$PWD"
 profile_path=""
 tool="auto"
+install_mode="local"
 session_hook=1
 dry_run=0
 
@@ -47,6 +50,14 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       case "$2" in
         auto|claude|codex|opencode|all) tool="$2" ;;
+        *) usage >&2; exit 2 ;;
+      esac
+      shift 2
+      ;;
+    --mode)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      case "$2" in
+        local|project) install_mode="$2" ;;
         *) usage >&2; exit 2 ;;
       esac
       shift 2
@@ -154,7 +165,7 @@ setup_tool() {
   printf '\nTool: %s\n' "$selected_tool"
   case "$selected_tool" in
     claude)
-      install_args=(claude install --project "$project_abs" --profile "$profile_path" --mode local)
+      install_args=(claude install --project "$project_abs" --profile "$profile_path" --mode "$install_mode")
       [[ "$session_hook" -eq 1 ]] && install_args+=(--session-hook)
       [[ "$dry_run" -eq 1 ]] && install_args+=(--dry-run)
       "$AGENT_RAILS_BIN" "${install_args[@]}"
@@ -162,14 +173,14 @@ setup_tool() {
       run_doctor "${doctor_args[@]}"
       ;;
     codex)
-      install_args=(codex install --project "$project_abs" --profile "$profile_path" --fix-project)
+      install_args=(codex install --project "$project_abs" --profile "$profile_path" --fix-project --mode "$install_mode")
       [[ "$dry_run" -eq 1 ]] && install_args+=(--dry-run)
       "$AGENT_RAILS_BIN" "${install_args[@]}"
       doctor_args=("$AGENT_RAILS_BIN" codex doctor --project "$project_abs")
       run_doctor "${doctor_args[@]}"
       ;;
     opencode)
-      install_args=(opencode install --project "$project_abs" --profile "$profile_path")
+      install_args=(opencode install --project "$project_abs" --profile "$profile_path" --mode "$install_mode")
       [[ "$dry_run" -eq 1 ]] && install_args+=(--dry-run)
       "$AGENT_RAILS_BIN" "${install_args[@]}"
       doctor_args=("$AGENT_RAILS_BIN" opencode doctor --project "$project_abs")
@@ -181,6 +192,7 @@ setup_tool() {
 printf 'Agent Rails Setup\n'
 printf 'Project: %s\n' "$project_abs"
 printf 'Profile: %s\n' "$profile_path"
+printf 'Mode: %s\n' "$install_mode"
 for selected_tool in "${selected_tools[@]}"; do
   setup_tool "$selected_tool"
 done

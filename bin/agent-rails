@@ -25,7 +25,7 @@ export AGENT_RAILS_VERSION
 usage() {
   cat <<'USAGE'
 Usage:
-  agent-rails setup [--project PATH] [--profile PATH] [--tool auto|claude|codex|opencode|all] [--no-session-hook] [--dry-run]
+  agent-rails setup [--project PATH] [--profile PATH] [--tool auto|claude|codex|opencode|all] [--mode local|project] [--no-session-hook] [--dry-run]
   agent-rails run [--project PATH] [--profile PATH] [--model NAME] [--pack-mode lite|normal|deep|audit] [goal text...]
   agent-rails verify [--project PATH] [--profile PATH] [--print-only] [--publish] [--base REF] [--target-ref REF] [--no-secret-scan]
 
@@ -43,10 +43,10 @@ Advanced:
   agent-rails profile init [--project PATH] [--name NAME] [--scope user|project] [--print-only]
   agent-rails claude install [--project PATH] [--profile PATH] [--mode local|project] [--global-reminder] [--session-hook]
   agent-rails claude uninstall [--project PATH] [--global-reminder] [--session-hook] [--dry-run]
-  agent-rails codex install [--project PATH] [--profile PATH] [--fix-project] [--dry-run]
+  agent-rails codex install [--project PATH] [--profile PATH] [--fix-project] [--mode local|project] [--dry-run]
   agent-rails codex doctor [--project PATH]
   agent-rails codex uninstall [--dry-run]
-  agent-rails opencode install [--project PATH] [--profile PATH] [--dry-run] [--force]
+  agent-rails opencode install [--project PATH] [--profile PATH] [--mode local|project] [--dry-run] [--force]
   agent-rails opencode doctor [--project PATH]
   agent-rails opencode uninstall [--project PATH] [--dry-run] [--force]
   agent-rails memory suggest [--project PATH] [--profile PATH] [--decision keep|skip|update|merge] [--write-local] [notes...]

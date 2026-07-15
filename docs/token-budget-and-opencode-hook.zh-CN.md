@@ -92,5 +92,5 @@ Doctor 应同时报告 request hook 和 config plugin 为 `OK`。OpenCode 需要
 
 - 不裁剪 OpenCode 原始历史；历史压缩仍由 OpenCode 负责。
 - 不在每次 token 计数时重新加载 tokenizer。
-- 不修改 `~/.config/opencode`；所有接入仍是项目本地且默认 Git local-ignore。
+- 不修改 `~/.config/opencode`；所有接入仍是项目内文件，默认 `--mode local` 使用 Git local-ignore。显式 `--mode project` 时插件从自身位置解析项目根，并在运行时通过 PATH 中的 `agent-rails` 定位当前 kit，不提交个人绝对路径。
 - 不把 tokenizer 模型文件复制进 Agent Rails 仓库。

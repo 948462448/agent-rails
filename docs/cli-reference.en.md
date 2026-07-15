@@ -13,15 +13,17 @@ agent-rails setup \
   [--project PATH] \
   [--profile PATH] \
   [--tool auto|claude|codex|opencode|all] \
+  [--mode local|project] \
   [--no-session-hook] \
   [--dry-run]
 ```
 
 - `auto` proceeds only when exactly one supported CLI is detected.
 - Multiple tools require an explicit choice; `all` means every personal install is intentional.
-- Claude uses local mode and enables the SessionStart hook by default.
-- Codex reuses the existing plugin install and project-repair flow.
-- OpenCode writes only its project-local adapter and does not modify global OpenCode configuration.
+- All three tools default to `local`: files live in the project but are hidden with a local Git exclude and do not affect collaborators.
+- `project` removes the managed local-ignore block and writes committable Adapter files without personal absolute paths for intentional team adoption.
+- Claude enables the SessionStart hook by default; `--no-session-hook` disables only that personal hook.
+- Codex reuses its plugin-install and project-repair flow; OpenCode does not modify global configuration.
 
 ### `run`
 
@@ -97,10 +99,11 @@ Update the kit and maintain one project Adapter in the same flow:
 
 ```bash
 agent-rails update --tool claude|codex|opencode [--project PATH] [--profile PATH] \
+  [--mode local|project] [--session-hook] [--global-reminder] \
   [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
 ```
 
-`update` requires one explicit tool, then runs that tool's pre-update Doctor, Adapter refresh, and final Doctor. Claude additionally supports `--mode local|project`, `--session-hook`, and `--global-reminder`; those options are rejected for Codex and OpenCode. A source checkout uses `git pull --ff-only` and runs source tests. A Release Install downloads an archive, verifies SHA-256, atomically switches versions, and skips source-only tests. In either mode, `--skip-pull` skips the kit update itself.
+`update` requires one explicit tool, then runs that tool's pre-update Doctor, Adapter refresh, and final Doctor. All three tools support `--mode local|project`; `--session-hook` and `--global-reminder` remain Claude-only. A source checkout uses `git pull --ff-only` and runs source tests. A Release Install downloads an archive, verifies SHA-256, atomically switches versions, and skips source-only tests. For either installation source, `--skip-pull` skips the kit update itself.
 
 ## Profiles and Project Scope
 
@@ -128,7 +131,7 @@ Modes change evidence density, not capability sections. The Model Preset Module 
 
 ## Adapter Ownership
 
-The Managed Adapter Workspace refreshes or removes only generated artifacts with an Agent Rails ownership marker and skills recorded in the exact managed inventory. Tracked files, user-authored same-path files, and unrelated `agent-*` skills are preserved. Git repositories prefer `.git/info/exclude` and do not modify the team's `.gitignore`.
+The Managed Adapter Workspace refreshes or removes only generated artifacts with an Agent Rails ownership marker and skills recorded in the exact managed inventory. Tracked files, user-authored same-path files, and unrelated `agent-*` skills are preserved. `local` uses `.git/info/exclude` without modifying the team's `.gitignore`; `project` removes the managed exclude and writes portable, committable content.
 
 ## Publish Baseline
 

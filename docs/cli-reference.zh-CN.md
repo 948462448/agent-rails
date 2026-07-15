@@ -13,15 +13,17 @@ agent-rails setup \
   [--project PATH] \
   [--profile PATH] \
   [--tool auto|claude|codex|opencode|all] \
+  [--mode local|project] \
   [--no-session-hook] \
   [--dry-run]
 ```
 
 - `auto` 只在恰好检测到一个受支持 CLI 时继续。
 - 多工具环境必须显式选择；`all` 表示明确接受全部个人安装。
-- Claude 使用 local mode，默认安装 SessionStart hook。
-- Codex 复用已有 plugin 安装和 project repair 流程。
-- OpenCode 只写项目本地 Adapter，不修改全局 OpenCode 配置。
+- 三种工具都默认使用 `local`：文件位于项目内，但只写入本地 Git exclude，不影响协作者。
+- `project` 会移除受管本地忽略块并生成可提交、无个人绝对路径的 Adapter；适合验证后推广。
+- Claude 默认安装 SessionStart hook；`--no-session-hook` 只关闭这个个人 Hook。
+- Codex 复用已有 plugin 安装和 project repair 流程；OpenCode 不修改全局配置。
 
 ### `run`
 
@@ -97,10 +99,11 @@ agent-rails upgrade self [--version VERSION] [--repository OWNER/REPO] \
 
 ```bash
 agent-rails update --tool claude|codex|opencode [--project PATH] [--profile PATH] \
+  [--mode local|project] [--session-hook] [--global-reminder] \
   [--skip-pull] [--skip-tests] [--skip-doctor] [--skip-adapter] [--dry-run]
 ```
 
-`update` 必须显式选择一种工具，并依次运行该工具的 pre-update Doctor、Adapter 刷新和 final Doctor。Claude 额外支持 `--mode local|project`、`--session-hook` 和 `--global-reminder`；这些参数不能用于 Codex 或 OpenCode。源码 checkout 使用 `git pull --ff-only` 并运行源码测试；Release 安装下载归档、校验 SHA-256、原子切换版本，并跳过不适用于归档安装的源码测试。`--skip-pull` 在两种安装模式下都表示跳过 kit 本身的更新。
+`update` 必须显式选择一种工具，并依次运行该工具的 pre-update Doctor、Adapter 刷新和 final Doctor。三种工具统一支持 `--mode local|project`；`--session-hook` 和 `--global-reminder` 仍只属于 Claude。源码 checkout 使用 `git pull --ff-only` 并运行源码测试；Release 安装下载归档、校验 SHA-256、原子切换版本，并跳过不适用于归档安装的源码测试。`--skip-pull` 在两种安装来源下都表示跳过 kit 本身的更新。
 
 ## Profile 与项目边界
 
@@ -128,7 +131,7 @@ Profile 解析顺序：
 
 ## Adapter 所有权
 
-Managed Adapter Workspace 只刷新或删除带 Agent Rails ownership marker 的生成物和清单中记录的 skill。tracked 文件、用户自建同路径文件和无关 `agent-*` skill 默认保留。Git 仓库优先使用 `.git/info/exclude`，不修改团队 `.gitignore`。
+Managed Adapter Workspace 只刷新或删除带 Agent Rails ownership marker 的生成物和清单中记录的 skill。tracked 文件、用户自建同路径文件和无关 `agent-*` skill 默认保留。`local` 使用 `.git/info/exclude` 且不修改团队 `.gitignore`；`project` 移除受管 exclude 并写入可提交的 portable 内容。
 
 ## 发布基线
 

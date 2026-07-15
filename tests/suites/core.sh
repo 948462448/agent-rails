@@ -101,30 +101,32 @@ test_update_codex_uses_codex_install_and_doctor() {
   output="$("$AGENT_RAILS_BIN" update --project "$repo" --tool codex --skip-pull --skip-tests --dry-run)"
 
   assert_contains "$output" "Tool: codex"
-  assert_not_contains "$output" "Adapter mode:"
+  assert_contains "$output" "Adapter mode: local"
   assert_contains "$output" "Would run: $AGENT_RAILS_BIN codex doctor --project"
   assert_contains "$output" "Would run: $AGENT_RAILS_BIN codex install --project"
   assert_contains "$output" "--fix-project"
+  assert_contains "$output" "--mode local"
   assert_not_contains "$output" "claude install"
   assert_not_contains "$output" "opencode install"
 }
 
-test_update_opencode_uses_opencode_install_and_doctor() {
+test_update_opencode_uses_selected_adapter_mode() {
   local repo="$TMP_ROOT/update-opencode-dry-run"
   local output
   prepare_update_repo "$repo"
 
-  output="$("$AGENT_RAILS_BIN" update --project "$repo" --tool opencode --skip-pull --skip-tests --dry-run)"
+  output="$("$AGENT_RAILS_BIN" update --project "$repo" --tool opencode --mode project --skip-pull --skip-tests --dry-run)"
 
   assert_contains "$output" "Tool: opencode"
-  assert_not_contains "$output" "Adapter mode:"
+  assert_contains "$output" "Adapter mode: project"
   assert_contains "$output" "Would run: $AGENT_RAILS_BIN opencode doctor --project"
   assert_contains "$output" "Would run: $AGENT_RAILS_BIN opencode install --project"
+  assert_contains "$output" "--mode project"
   assert_not_contains "$output" "claude install"
   assert_not_contains "$output" "codex install"
 }
 
-test_update_rejects_claude_options_for_other_tools() {
+test_update_rejects_claude_hooks_for_other_tools() {
   local repo="$TMP_ROOT/update-tool-options"
   local output
   prepare_update_repo "$repo"
@@ -134,7 +136,7 @@ test_update_rejects_claude_options_for_other_tools() {
     return 1
   fi
 
-  assert_contains "$output" "--mode, --session-hook, and --global-reminder are only supported with --tool claude"
+  assert_contains "$output" "--session-hook and --global-reminder are only supported with --tool claude"
 }
 
 test_update_falls_back_from_missing_legacy_kit_profile() {
@@ -410,7 +412,7 @@ test_codex_install_and_uninstall_dry_run() {
   git -C "$repo" add README.md
   git_commit "$repo" init
 
-  output="$("$AGENT_RAILS_BIN" codex install --project "$repo" --fix-project --dry-run)"
+  output="$("$AGENT_RAILS_BIN" codex install --project "$repo" --fix-project --mode project --dry-run)"
 
   assert_contains "$output" "Agent Rails Codex Install"
   assert_contains "$output" "codex plugin marketplace add"
@@ -418,6 +420,7 @@ test_codex_install_and_uninstall_dry_run() {
   assert_contains "$output" "codex plugin add agent-rails@agent-rails-local"
   assert_contains "$output" "doctor --project"
   assert_contains "$output" "--fix"
+  assert_contains "$output" "--mode project"
   assert_contains "$output" "Open a new Codex thread"
 
   output="$("$AGENT_RAILS_BIN" codex uninstall --dry-run)"
@@ -488,6 +491,18 @@ test_setup_auto_requires_choice_for_multiple_tools() {
   assert_contains "$output" "--tool all"
 }
 
+test_setup_project_mode_reaches_opencode() {
+  local repo="$TMP_ROOT/setup-opencode-project-mode"
+  local output
+  prepare_update_repo "$repo"
+
+  output="$("$AGENT_RAILS_BIN" setup --project "$repo" --tool opencode --mode project --dry-run)"
+
+  assert_contains "$output" "Mode: project"
+  assert_contains "$output" "Agent Rails opencode Install"
+  assert_not_contains "$output" "Would ensure local ignore entries"
+}
+
 run_core_tests() {
   run_test test_init_prints_shell_setup "init prints shell setup"
   run_test test_init_without_project_stays_project_neutral "init stays project-neutral by default"
@@ -497,8 +512,8 @@ run_core_tests() {
   run_test test_update_requires_explicit_tool "update requires an explicit tool"
   run_test test_update_claude_dry_run_sequences_project_refresh "update refreshes Claude with Claude doctor"
   run_test test_update_codex_uses_codex_install_and_doctor "update refreshes Codex with Codex doctor"
-  run_test test_update_opencode_uses_opencode_install_and_doctor "update refreshes OpenCode with OpenCode doctor"
-  run_test test_update_rejects_claude_options_for_other_tools "update rejects Claude-only options for other tools"
+  run_test test_update_opencode_uses_selected_adapter_mode "update forwards the selected OpenCode adapter mode"
+  run_test test_update_rejects_claude_hooks_for_other_tools "update rejects Claude-only hooks for other tools"
   run_test test_update_falls_back_from_missing_legacy_kit_profile "update falls back from missing legacy kit profile"
   run_test test_upgrade_self_rejects_tool "upgrade self rejects project tool selection"
   run_test test_upgrade_self_only_skips_project_refresh "upgrade self skips project refresh"
@@ -512,4 +527,5 @@ run_core_tests() {
   run_test test_setup_claude_dry_run_uses_local_adapter_and_doctor "setup configures Claude and plans doctor"
   run_test test_setup_auto_detects_single_tool "setup auto-detects one tool"
   run_test test_setup_auto_requires_choice_for_multiple_tools "setup requires a choice for multiple tools"
+  run_test test_setup_project_mode_reaches_opencode "setup forwards project mode to OpenCode"
 }

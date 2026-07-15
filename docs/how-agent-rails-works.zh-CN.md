@@ -144,7 +144,7 @@ flowchart TD
 
 ## Adapter 的所有权模型
 
-Adapter 把 Agent Rails 接入不同 coding-agent 工具，但它仍然是个人本地集成。默认使用目标仓库的 `.git/info/exclude`，不会修改团队 `.gitignore`。
+Adapter 把 Agent Rails 接入不同 coding-agent 工具。默认 `local` 是个人集成：使用目标仓库的 `.git/info/exclude`，不会修改团队 `.gitignore`。验证有效后可显式选择 `project`，把同一套受管生成物提升为 portable、可提交的团队文件。
 
 ```mermaid
 flowchart TD
@@ -154,12 +154,14 @@ flowchart TD
     CLASSIFY -->|Git tracked| TRACKED["保留"]
     CLASSIFY -->|用户自建同路径内容| USER_FILE["保留"]
     CLASSIFY -->|新的空闲路径| NEW["写入带 ownership marker 的生成物"]
-    MANAGED --> LOCAL_IGNORE["维护幂等的本地忽略块"]
-    SKILL --> LOCAL_IGNORE
-    NEW --> LOCAL_IGNORE
+    MANAGED --> MODE{"Adapter mode？"}
+    SKILL --> MODE
+    NEW --> MODE
+    MODE -->|local 默认| LOCAL_IGNORE["维护幂等的本地忽略块<br/>协作者不可见"]
+    MODE -->|project 显式| PROJECT_FILES["移除受管忽略块<br/>生成无个人绝对路径的可提交文件"]
 ```
 
-`--force` 是显式修复选择，不是自动更新的默认行为。`update` 走所有权感知的刷新路径；损坏的受管内容可由 `doctor --fix` 修复。
+`local → project` 是正式的推广路径；反向切换会重新建立本地忽略。`--force` 是显式修复选择，不是自动更新的默认行为。`update` 走所有权感知的刷新路径；损坏的受管内容可由 `doctor --fix` 修复。
 
 ## Git Scope、验证与发布证据
 
@@ -205,7 +207,7 @@ flowchart TD
     TESTS --> SELF{"只升级 kit？"}
     SKIP_TESTS --> SELF
     SELF -->|是| DONE["完成，旧版本目录保留用于回滚"]
-    SELF -->|否| TOOL{"显式 --tool"}
+    SELF -->|否| TOOL{"显式 --tool 与 --mode"}
     TOOL -->|claude| CLAUDE["Claude Doctor → Install → Final Doctor"]
     TOOL -->|codex| CODEX["Codex Doctor → Install → Final Doctor"]
     TOOL -->|opencode| OPENCODE["OpenCode Doctor → Install → Final Doctor"]

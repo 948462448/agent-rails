@@ -31,7 +31,7 @@ agent-rails memory suggest \
   "<1-3 sentence reusable lesson>"
 ```
 
-If `agent-rails` is not on PATH, run `/Users/songlei/workspace/agent-rails/bin/agent-rails`.
+Project-mode adapters expect `agent-rails` on PATH. Local adapters may use the absolute CLI path generated for that machine.
 
 ## Rules
 

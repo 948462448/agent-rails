@@ -144,7 +144,7 @@ A directory basename cannot prove repository identity. Isolation therefore depen
 
 ## Adapter Ownership Model
 
-Adapters connect Agent Rails to different coding-agent tools, but remain personal local integrations. They use the target repository's `.git/info/exclude` by default and do not modify the team's `.gitignore`.
+Adapters connect Agent Rails to different coding-agent tools. The default `local` mode is personal: it uses the target repository's `.git/info/exclude` and does not modify the team's `.gitignore`. After validation, explicit `project` mode promotes the same managed artifacts into portable, committable team files.
 
 ```mermaid
 flowchart TD
@@ -154,12 +154,14 @@ flowchart TD
     CLASSIFY -->|Git tracked| TRACKED["Preserve"]
     CLASSIFY -->|User-authored same-path content| USER_FILE["Preserve"]
     CLASSIFY -->|New unoccupied path| NEW["Write generated content with an ownership marker"]
-    MANAGED --> LOCAL_IGNORE["Maintain an idempotent local-ignore block"]
-    SKILL --> LOCAL_IGNORE
-    NEW --> LOCAL_IGNORE
+    MANAGED --> MODE{"Adapter mode?"}
+    SKILL --> MODE
+    NEW --> MODE
+    MODE -->|local default| LOCAL_IGNORE["Maintain an idempotent local-ignore block<br/>Invisible to collaborators"]
+    MODE -->|explicit project| PROJECT_FILES["Remove the managed ignore block<br/>Write committable files without personal paths"]
 ```
 
-`--force` is an explicit repair choice, not the automatic update default. `update` follows the ownership-aware refresh path; `doctor --fix` can repair damaged managed content.
+`local → project` is the formal promotion path; switching back restores local ignores. `--force` is an explicit repair choice, not the automatic update default. `update` follows the ownership-aware refresh path; `doctor --fix` can repair damaged managed content.
 
 ## Git Scope, Verification, and Publish Evidence
 
@@ -205,7 +207,7 @@ flowchart TD
     TESTS --> SELF{"Kit-only upgrade?"}
     SKIP_TESTS --> SELF
     SELF -->|Yes| DONE["Done; keep old version directories for rollback"]
-    SELF -->|No| TOOL{"Explicit --tool"}
+    SELF -->|No| TOOL{"Explicit --tool and --mode"}
     TOOL -->|claude| CLAUDE["Claude Doctor → Install → Final Doctor"]
     TOOL -->|codex| CODEX["Codex Doctor → Install → Final Doctor"]
     TOOL -->|opencode| OPENCODE["OpenCode Doctor → Install → Final Doctor"]

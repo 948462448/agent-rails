@@ -5,12 +5,13 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: agent-rails opencode install [--project PATH] [--profile PATH] [--dry-run] [--force]
+Usage: agent-rails opencode install [--project PATH] [--profile PATH] [--mode local|project] [--dry-run] [--force]
        agent-rails opencode doctor [--project PATH]
        agent-rails opencode uninstall [--project PATH] [--dry-run] [--force]
 
-opencode install writes a project-local .opencode/ adapter and ignores it
-locally in git repositories. It does not modify ~/.config/opencode.
+opencode install writes a project-local .opencode/ adapter. Mode local ignores
+the generated files in git repositories; mode project makes them committable.
+It does not modify ~/.config/opencode.
 USAGE
 }
 
@@ -34,6 +35,8 @@ shift || true
 
 project="$PWD"
 profile_path=""
+install_mode="local"
+install_mode_explicit=0
 dry_run=0
 force=0
 
@@ -47,6 +50,15 @@ while [[ $# -gt 0 ]]; do
     --profile)
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       profile_path="$2"
+      shift 2
+      ;;
+    --mode)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      case "$2" in
+        local|project) install_mode="$2" ;;
+        *) usage >&2; exit 2 ;;
+      esac
+      install_mode_explicit=1
       shift 2
       ;;
     --dry-run)
@@ -67,6 +79,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$subcommand" != "install" && "$install_mode_explicit" -eq 1 ]]; then
+  printf '%s\n' '--mode is only supported by agent-rails opencode install.' >&2
+  exit 2
+fi
 
 if [[ ! -d "$project" ]]; then
   printf 'Project directory not found: %s\n' "$project" >&2
@@ -92,7 +109,19 @@ opencode_config_path="$opencode_dir/opencode.json"
 plugin_path="$plugins_dir/agent-rails.mjs"
 plugin_template_path="$AGENT_RAILS_HOME/templates/opencode-agent-rails-plugin.mjs"
 legacy_opencode_instruction_path="$guide_path"
+legacy_relative_instruction_path=".opencode/AGENT_RAILS.md"
 managed_skills_path="$opencode_dir/.agent-rails-managed-skills"
+opencode_ignore_entries=(
+  ".opencode/AGENT_RAILS.md"
+  ".opencode/.agent-rails-managed-skills"
+  ".opencode/opencode.json"
+  ".opencode/plugins/agent-rails.mjs"
+  ".opencode/command/agent-rails-pack.md"
+  ".opencode/command/agent-rails-lite.md"
+  ".opencode/command/agent-rails-check.md"
+  ".opencode/skills/agent-*/"
+  ".agent-rails/"
+)
 agent_adapter_workspace_init \
   "$guide_path" \
   "$pack_command_path" \
@@ -114,12 +143,14 @@ legacy_adapter=0
 if [[ ! -f "$managed_skills_path" ]] && agent_adapter_workspace_is_generated_file "$guide_path"; then
   legacy_adapter=1
 fi
+protect_tracked=0
+[[ "$install_mode" == "local" ]] && protect_tracked=1
 agent_adapter_workspace_configure \
   "$project_abs" \
   ".opencode/skills" \
   "$dry_run" \
   "$force" \
-  1 \
+  "$protect_tracked" \
   "$legacy_adapter"
 
 require_python_for_config() {
@@ -140,19 +171,30 @@ normalize_positive_integer() {
 }
 
 render_opencode_plugin() {
+  local plugin_bin="$AGENT_RAILS_BIN"
+  local plugin_assembler="$AGENT_RAILS_HOME/scripts/agent-context-assemble.py"
+  local plugin_project="$project_abs"
+  local plugin_profile="$profile_path"
   require_python_for_config
   [[ -f "$plugin_template_path" ]] || {
     printf 'OpenCode plugin template is missing: %s\n' "$plugin_template_path" >&2
     return 1
   }
 
+  if [[ "$install_mode" == "project" ]]; then
+    plugin_bin="agent-rails"
+    plugin_assembler=""
+    plugin_project=""
+    plugin_profile=""
+  fi
+
   python3 - \
     "$plugin_template_path" \
     "$AGENT_RAILS_VERSION" \
-    "$AGENT_RAILS_BIN" \
-    "$AGENT_RAILS_HOME/scripts/agent-context-assemble.py" \
-    "$project_abs" \
-    "$profile_path" \
+    "$plugin_bin" \
+    "$plugin_assembler" \
+    "$plugin_project" \
+    "$plugin_profile" \
     "${AGENT_RAILS_TOKENIZER:-auto}" \
     "${AGENT_RAILS_TOKENIZER_CMD:-}" \
     "${AGENT_RAILS_TOKENIZER_PATH:-}" \
@@ -215,7 +257,8 @@ PY
 }
 
 merge_opencode_config() {
-  if [[ "$force" -ne 1 ]] && agent_adapter_workspace_is_tracked_file "$opencode_config_path"; then
+  if [[ "$install_mode" == "local" && "$force" -ne 1 ]] \
+    && agent_adapter_workspace_is_tracked_file "$opencode_config_path"; then
     printf 'Keeping tracked opencode config in local mode: %s\n' "$opencode_config_path"
     if grep -Fq "$plugin_path" "$opencode_config_path" 2>/dev/null; then
       printf '[OK] Tracked opencode config already references Agent Rails plugin.\n'
@@ -236,7 +279,12 @@ merge_opencode_config() {
 
   require_python_for_config
   mkdir -p "$(dirname "$opencode_config_path")"
-  python3 - "$opencode_config_path" "$plugin_path" "$legacy_opencode_instruction_path" <<'PY'
+  python3 - \
+    "$opencode_config_path" \
+    "$plugin_path" \
+    "$legacy_opencode_instruction_path" \
+    "$legacy_relative_instruction_path" \
+    "$install_mode" <<'PY'
 import json
 import pathlib
 import sys
@@ -244,6 +292,8 @@ import sys
 config_path = pathlib.Path(sys.argv[1])
 plugin_path = sys.argv[2]
 legacy_instruction_path = sys.argv[3]
+legacy_relative_instruction_path = sys.argv[4]
+install_mode = sys.argv[5]
 
 if config_path.exists():
     try:
@@ -259,16 +309,26 @@ else:
     data = {}
 
 data.setdefault("$schema", "https://opencode.ai/config.json")
-plugins = data.setdefault("plugin", [])
-if not isinstance(plugins, list) or not all(isinstance(item, str) for item in plugins):
-    raise SystemExit(f"{config_path} field 'plugin' must be an array of strings.")
-if plugin_path not in plugins:
-    plugins.append(plugin_path)
+plugins = data.get("plugin")
+if plugins is not None:
+    if not isinstance(plugins, list) or not all(isinstance(item, str) for item in plugins):
+        raise SystemExit(f"{config_path} field 'plugin' must be an array of strings.")
+    plugins[:] = [item for item in plugins if item != plugin_path]
+if install_mode == "local":
+    plugins = data.setdefault("plugin", [])
+    if plugin_path not in plugins:
+        plugins.append(plugin_path)
+elif plugins == []:
+    data.pop("plugin", None)
 
 # Migrate the old static-instructions adapter. Unrelated instructions stay intact.
 instructions = data.get("instructions")
 if isinstance(instructions, list):
-    data["instructions"] = [item for item in instructions if item != legacy_instruction_path]
+    data["instructions"] = [
+        item
+        for item in instructions
+        if item not in {legacy_instruction_path, legacy_relative_instruction_path}
+    ]
     if not data["instructions"]:
         data.pop("instructions", None)
 
@@ -289,7 +349,11 @@ remove_opencode_config_plugin() {
   fi
 
   require_python_for_config
-  python3 - "$opencode_config_path" "$plugin_path" "$legacy_opencode_instruction_path" <<'PY'
+  python3 - \
+    "$opencode_config_path" \
+    "$plugin_path" \
+    "$legacy_opencode_instruction_path" \
+    "$legacy_relative_instruction_path" <<'PY'
 import json
 import pathlib
 import sys
@@ -297,6 +361,7 @@ import sys
 config_path = pathlib.Path(sys.argv[1])
 plugin_path = sys.argv[2]
 legacy_instruction_path = sys.argv[3]
+legacy_relative_instruction_path = sys.argv[4]
 
 try:
     data = json.loads(config_path.read_text())
@@ -313,7 +378,11 @@ if isinstance(plugins, list):
 
 instructions = data.get("instructions")
 if isinstance(instructions, list):
-    data["instructions"] = [item for item in instructions if item != legacy_instruction_path]
+    data["instructions"] = [
+        item
+        for item in instructions
+        if item not in {legacy_instruction_path, legacy_relative_instruction_path}
+    ]
     if not data["instructions"]:
         data.pop("instructions", None)
 
@@ -370,7 +439,13 @@ print_status() {
   done
 }
 
-agent_adapter_content_init opencode "$AGENT_RAILS_VERSION" "$AGENT_RAILS_BIN" "$profile_path"
+adapter_content_bin="$AGENT_RAILS_BIN"
+adapter_content_profile="$profile_path"
+if [[ "$install_mode" == "project" ]]; then
+  adapter_content_bin="agent-rails"
+  adapter_content_profile=""
+fi
+agent_adapter_content_init opencode "$AGENT_RAILS_VERSION" "$adapter_content_bin" "$adapter_content_profile"
 guide_content="$(agent_adapter_content_render guide)"
 pack_command_content="$(agent_adapter_content_render pack)"
 lite_command_content="$(agent_adapter_content_render lite)"
@@ -382,6 +457,7 @@ case "$subcommand" in
     printf 'Version: %s\n' "$AGENT_RAILS_VERSION"
     printf 'Project: %s\n' "$project_abs"
     printf 'Profile: %s\n' "$profile_path"
+    printf 'Mode: %s\n' "$install_mode"
     plugin_content="$(render_opencode_plugin)"
     agent_adapter_workspace_install_skills
     agent_adapter_workspace_write_generated_file "$guide_path" "$guide_content"
@@ -391,19 +467,21 @@ case "$subcommand" in
     agent_adapter_workspace_write_generated_file "$plugin_path" "$plugin_content"
     merge_opencode_config
     agent_adapter_workspace_write_managed_skills
-    agent_adapter_workspace_ensure_ignore_block \
-      "$local_ignore_path" \
-      "# Agent Rails opencode adapter" \
-      "# Agent Rails opencode adapter end" \
-      ".opencode/AGENT_RAILS.md" \
-      ".opencode/.agent-rails-managed-skills" \
-      ".opencode/opencode.json" \
-      ".opencode/plugins/agent-rails.mjs" \
-      ".opencode/command/agent-rails-pack.md" \
-      ".opencode/command/agent-rails-lite.md" \
-      ".opencode/command/agent-rails-check.md" \
-      ".opencode/skills/agent-*/" \
-      ".agent-rails/"
+    if [[ "$install_mode" == "local" ]]; then
+      agent_adapter_workspace_ensure_ignore_block \
+        "$local_ignore_path" \
+        "# Agent Rails opencode adapter" \
+        "# Agent Rails opencode adapter end" \
+        "${opencode_ignore_entries[@]}"
+    else
+      agent_adapter_workspace_remove_ignore_block \
+        "$local_ignore_path" \
+        "# Agent Rails opencode adapter" \
+        "# Agent Rails opencode adapter end" \
+        "Would remove local ignore entries from" \
+        "Removed local ignore entries from" \
+        "${opencode_ignore_entries[@]}"
+    fi
     printf '\nopencode adapter ready.\n'
     printf 'Task Pack: %s\n' "$task_pack_path"
     printf 'Restart opencode or open a new opencode session for config changes to take effect.\n'
@@ -429,15 +507,7 @@ case "$subcommand" in
       "# Agent Rails opencode adapter end" \
       "Would remove local ignore entries from" \
       "Updated local ignore file:" \
-      ".opencode/AGENT_RAILS.md" \
-      ".opencode/.agent-rails-managed-skills" \
-      ".opencode/opencode.json" \
-      ".opencode/plugins/agent-rails.mjs" \
-      ".opencode/command/agent-rails-pack.md" \
-      ".opencode/command/agent-rails-lite.md" \
-      ".opencode/command/agent-rails-check.md" \
-      ".opencode/skills/agent-*/" \
-      ".agent-rails/"
+      "${opencode_ignore_entries[@]}"
     if [[ "$dry_run" -ne 1 ]]; then
       rmdir "$commands_dir" "$plugins_dir" "$skills_dir" "$opencode_dir" 2>/dev/null || true
     fi

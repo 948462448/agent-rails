@@ -112,6 +112,49 @@ PY
   assert_file_contains "$config_path" '"theme": "system"'
 }
 
+test_opencode_can_promote_local_adapter_to_project_mode() {
+  local repo="$TMP_ROOT/opencode-project-mode"
+  local repo_abs exclude_path output profile
+  mkdir -p "$repo"
+  repo_abs="$(cd "$repo" && pwd -P)"
+  profile="$ROOT_DIR/profiles/default.profile"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  "$AGENT_RAILS_BIN" opencode install --project "$repo" --mode local >/dev/null
+  exclude_path="$(git -C "$repo" rev-parse --git-path info/exclude)"
+  case "$exclude_path" in
+    /*) ;;
+    *) exclude_path="$repo/$exclude_path" ;;
+  esac
+  assert_file_contains "$exclude_path" "# Agent Rails opencode adapter"
+  assert_file_contains "$repo/.opencode/opencode.json" "$repo_abs/.opencode/plugins/agent-rails.mjs"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "$repo_abs"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "$profile"
+
+  output="$("$AGENT_RAILS_BIN" opencode install --project "$repo" --mode project)"
+
+  assert_contains "$output" "Mode: project"
+  assert_file_not_contains "$exclude_path" "# Agent Rails opencode adapter"
+  assert_file_not_contains "$repo/.opencode/opencode.json" "$repo_abs/.opencode/plugins/agent-rails.mjs"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" '"bin": "agent-rails"'
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" 'import.meta.url'
+  assert_file_not_contains "$repo/.opencode/plugins/agent-rails.mjs" "$repo_abs"
+  assert_file_not_contains "$repo/.opencode/plugins/agent-rails.mjs" "$ROOT_DIR"
+  assert_file_not_contains "$repo/.opencode/plugins/agent-rails.mjs" "$profile"
+  assert_file_not_contains "$repo/.opencode/AGENT_RAILS.md" "$ROOT_DIR"
+  if command -v node >/dev/null 2>&1; then
+    node --check "$repo/.opencode/plugins/agent-rails.mjs" >/dev/null
+  fi
+  if git -C "$repo" check-ignore -q .opencode/plugins/agent-rails.mjs; then
+    printf 'Expected project-mode OpenCode adapter to be visible to Git.\n' >&2
+    return 1
+  fi
+  assert_contains "$(git -C "$repo" status --short)" "?? .opencode/"
+}
+
 test_managed_adapter_workspace_module_contract() {
   local project_dir="$TMP_ROOT/managed-adapter-workspace-module"
   local adapter_dir="$project_dir/.adapter"
@@ -365,6 +408,42 @@ test_claude_force_replaces_existing_block() {
   assert_file_not_contains "$repo/CLAUDE.md" "OLD BLOCK"
   assert_file_contains "$repo/CLAUDE.md" "AGENT RAILS: ON"
   assert_file_contains "$repo/CLAUDE.md" "Subagent Result Contract"
+}
+
+test_claude_can_promote_local_adapter_to_portable_project_mode() {
+  local repo="$TMP_ROOT/claude-project-mode"
+  local exclude_path output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  "$AGENT_RAILS_BIN" claude install --project "$repo" --mode local >/dev/null
+  exclude_path="$(git -C "$repo" rev-parse --git-path info/exclude)"
+  case "$exclude_path" in
+    /*) ;;
+    *) exclude_path="$repo/$exclude_path" ;;
+  esac
+  assert_file_contains "$exclude_path" "# Agent Rails local adapter"
+  assert_file_contains "$repo/CLAUDE.local.md" "$ROOT_DIR"
+
+  output="$("$AGENT_RAILS_BIN" claude install --project "$repo" --mode project)"
+
+  assert_contains "$output" "Mode: project"
+  assert_file_not_exists "$repo/CLAUDE.local.md"
+  assert_file_not_contains "$exclude_path" "# Agent Rails local adapter"
+  assert_file_contains "$repo/CLAUDE.md" "agent-rails pack"
+  assert_file_not_contains "$repo/CLAUDE.md" "$ROOT_DIR"
+  assert_file_not_contains "$repo/.claude/AGENT_RAILS.md" "$ROOT_DIR"
+  assert_file_not_contains "$repo/.claude/commands/agent-rails-pack.md" "$ROOT_DIR"
+  assert_file_not_contains "$repo/.claude/skills/agent-check/SKILL.md" "/Users/songlei"
+  if git -C "$repo" check-ignore -q CLAUDE.md; then
+    printf 'Expected project-mode Claude adapter to be visible to Git.\n' >&2
+    return 1
+  fi
+  assert_contains "$(git -C "$repo" status --short)" "?? .claude/"
+  assert_contains "$(git -C "$repo" status --short)" "?? CLAUDE.md"
 }
 
 test_claude_install_refresh_and_uninstall() {
@@ -796,6 +875,7 @@ PROFILE
 run_adapter_foundation_tests() {
   run_test test_opencode_install_doctor_and_uninstall "opencode install/doctor/uninstall"
   run_test test_opencode_plugin_migrates_legacy_config_and_preserves_user_entries "opencode plugin migrates legacy config"
+  run_test test_opencode_can_promote_local_adapter_to_project_mode "opencode promotes local adapter to project mode"
   run_test test_managed_adapter_workspace_module_contract "managed adapter workspace module contract"
   run_test test_adapter_content_module_contract "shared adapter content module contract"
   run_test test_adapter_install_preserves_unmanaged_generated_paths "adapter install preserves unmanaged generated paths"
@@ -804,6 +884,7 @@ run_adapter_foundation_tests() {
 
 run_adapter_claude_tests() {
   run_test test_claude_force_replaces_existing_block "claude install --force replaces existing block"
+  run_test test_claude_can_promote_local_adapter_to_portable_project_mode "claude promotes local adapter to portable project mode"
   run_test test_claude_install_refresh_and_uninstall "claude install refresh and uninstall lifecycle"
   run_test test_claude_install_refreshes_generated_adapter_without_force "claude install refreshes generated adapter without force"
   run_test test_claude_upgrade_alias_is_deprecated "claude upgrade alias is deprecated"

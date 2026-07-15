@@ -15,6 +15,14 @@ For a narrative overview of the complete system and its diagrams, see [How Agent
 - Installed skill names are recorded in adapter-local inventories (`.claude/.agent-rails-managed-skills` and `.opencode/.agent-rails-managed-skills`); uninstall removes only those exact names and leaves unrelated skills intact.
 - `doctor` verifies the generated integration, while `uninstall` removes only Agent Rails-managed artifacts and preserves tracked files unless explicitly forced.
 
+### Adapter Visibility Modes
+
+- Claude, Codex project repair, and OpenCode share `--mode local|project`; `setup` and `update` forward the same choice.
+- `local` is the default. Generated files stay inside the target project for tool discovery but are hidden through the repository-local Git exclude, so coworkers do not need Agent Rails.
+- `project` is an explicit promotion step. It removes only the Agent Rails-managed ignore block and renders portable commands that resolve `agent-rails` from PATH instead of embedding one user's kit, project, or Profile paths.
+- OpenCode project plugins derive the target root from `import.meta.url`, discover the active kit through `agent-rails home`, and rely on normal Profile resolution. Local plugins retain explicit absolute paths for exact worktree isolation.
+- Switching modes preserves user-authored and tracked same-path content under the existing ownership rules. Agent Rails makes files visible but never commits them.
+
 ### Safe Adapter Refresh
 
 - Claude and OpenCode adapter files carry an Agent Rails generated marker. Installation refreshes recognized generated guides and commands without requiring a destructive force flag.
@@ -83,8 +91,8 @@ The tag workflow validates that `v<VERSION>` points to a commit contained in `ma
 
 The implementation is covered by the repository test suite, including:
 
-- OpenCode install, doctor, refresh, exact-inventory uninstall, configuration merge, user-file preservation, legacy inventory migration, and local-ignore behavior.
-- Claude managed-file refresh, exact-inventory uninstall, and same-path user-file preservation behavior.
+- OpenCode install, doctor, refresh, exact-inventory uninstall, configuration merge, user-file preservation, legacy inventory migration, local-ignore behavior, and portable local-to-project promotion.
+- Claude managed-file refresh, exact-inventory uninstall, same-path user-file preservation, and portable local-to-project promotion behavior.
 - The Managed Adapter Workspace Interface, including legacy generated-file signatures, inventory validation, tracked/unmanaged preservation, skill lifecycle, and idempotent local-ignore blocks.
 - The shared Adapter Content Interface, with byte-for-byte compatibility checks for Claude and OpenCode generated guides and commands.
 - SessionStart target/profile and sensitive-output guidance.

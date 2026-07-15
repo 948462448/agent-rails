@@ -22,7 +22,7 @@ agent-rails run --project /path/to/project --profile /path/to/profile --pack-mod
 If `agent-rails` is not on PATH, run:
 
 ```bash
-/Users/songlei/workspace/agent-rails/bin/agent-rails run --project /path/to/project --profile /path/to/profile "<goal>"
+agent-rails run --project /path/to/project --profile /path/to/profile "<goal>"
 ```
 
 ## Workflow

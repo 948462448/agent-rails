@@ -21,7 +21,7 @@ bin/agent-rails verify --project /path/to/project
 bin/agent-rails verify --project /path/to/project --publish --base deployed-source-revision
 bin/agent-rails update --tool claude --project /path/to/project --profile /path/to/profile --session-hook
 bin/agent-rails update --tool codex --project /path/to/project
-bin/agent-rails update --tool opencode --project /path/to/project
+bin/agent-rails update --tool opencode --project /path/to/project --mode local
 bin/agent-rails pack --project /path/to/project "本次任务目标"
 bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode deep "本次任务目标"
 bin/agent-rails run --project /path/to/project --model qwen3.7-max --pack-mode lite "POC / deploy prep 目标"
@@ -37,10 +37,11 @@ bin/agent-rails claude install --project /path/to/project --profile /path/to/pro
 bin/agent-rails claude install --project /path/to/project --profile /path/to/profile --mode local --session-hook
 bin/agent-rails claude uninstall --project /path/to/project --session-hook --dry-run
 bin/agent-rails codex install
-bin/agent-rails codex install --project /path/to/project --fix-project
+bin/agent-rails codex install --project /path/to/project --fix-project --mode local
 bin/agent-rails codex doctor --project /path/to/project
 bin/agent-rails codex uninstall --dry-run
-bin/agent-rails opencode install --project /path/to/project
+bin/agent-rails opencode install --project /path/to/project --mode local
+bin/agent-rails opencode install --project /path/to/project --mode project
 bin/agent-rails opencode doctor --project /path/to/project
 bin/agent-rails opencode uninstall --project /path/to/project --dry-run
 bin/agent-rails skills install --dest /path/to/project/.claude/skills

@@ -15,8 +15,9 @@ Update source depends on how the kit was installed:
 `upgrade self` updates only the kit and does not require a target project.
 `update` requires an explicit coding-agent tool. It runs source tests only for
 a Git checkout, then the selected Adapter's Doctor and refresh unless skipped.
+Adapter mode defaults to local; project mode writes files that may be committed.
 
---mode, --session-hook, and --global-reminder apply only to --tool claude.
+--session-hook and --global-reminder apply only to --tool claude.
 USAGE
 }
 
@@ -35,7 +36,6 @@ profile_path=""
 tool=""
 tool_explicit=0
 install_mode="local"
-install_mode_explicit=0
 session_hook=0
 global_reminder=0
 requested_version="latest"
@@ -97,7 +97,6 @@ while [[ $# -gt 0 ]]; do
         local|project) install_mode="$2" ;;
         *) usage >&2; exit 2 ;;
       esac
-      install_mode_explicit=1
       shift 2
       ;;
     --session-hook)
@@ -174,8 +173,8 @@ elif [[ "$tool_explicit" -ne 1 ]]; then
   printf '%s\n' '--tool is required for agent-rails update.' >&2
   printf '%s\n' 'Choose --tool claude, codex, or opencode.' >&2
   exit 2
-elif [[ "$tool" != "claude" && ( "$install_mode_explicit" -eq 1 || "$session_hook" -eq 1 || "$global_reminder" -eq 1 ) ]]; then
-  printf '%s\n' '--mode, --session-hook, and --global-reminder are only supported with --tool claude.' >&2
+elif [[ "$tool" != "claude" && ( "$session_hook" -eq 1 || "$global_reminder" -eq 1 ) ]]; then
+  printf '%s\n' '--session-hook and --global-reminder are only supported with --tool claude.' >&2
   exit 2
 fi
 
@@ -215,11 +214,11 @@ configure_adapter_commands() {
       adapter_doctor_args=(doctor --project "$project_abs" --profile "$profile_path")
       ;;
     codex)
-      adapter_install_args=(codex install --project "$project_abs" --profile "$profile_path" --fix-project)
+      adapter_install_args=(codex install --project "$project_abs" --profile "$profile_path" --fix-project --mode "$install_mode")
       adapter_doctor_args=(codex doctor --project "$project_abs")
       ;;
     opencode)
-      adapter_install_args=(opencode install --project "$project_abs" --profile "$profile_path")
+      adapter_install_args=(opencode install --project "$project_abs" --profile "$profile_path" --mode "$install_mode")
       adapter_doctor_args=(opencode doctor --project "$project_abs")
       ;;
   esac
@@ -357,9 +356,7 @@ fi
 if [[ "$needs_project" -eq 1 ]]; then
   printf 'Project: %s\n' "$project_abs"
   printf 'Profile: %s\n' "$profile_path"
-  if [[ "$tool" == "claude" ]]; then
-    printf 'Adapter mode: %s\n' "$install_mode"
-  fi
+  printf 'Adapter mode: %s\n' "$install_mode"
 fi
 
 if kit_is_git_checkout; then

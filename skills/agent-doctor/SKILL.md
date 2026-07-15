@@ -16,7 +16,7 @@ agent-rails doctor --project /path/to/project --profile /path/to/profile
 If `agent-rails` is not on PATH, run:
 
 ```bash
-/Users/songlei/workspace/agent-rails/bin/agent-rails doctor --project /path/to/project --profile /path/to/profile
+agent-rails doctor --project /path/to/project --profile /path/to/profile
 ```
 
 To test the OpenMemory read path, run explicitly:

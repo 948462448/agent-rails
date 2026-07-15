@@ -134,9 +134,10 @@ agent-rails upgrade self --version 0.6.1
 After updating the CLI, refresh the project integration for the coding agent you actually use. For OpenCode:
 
 ```bash
-project_root="$(git rev-parse --show-toplevel)"
-agent-rails setup --project "$project_root" --tool opencode
+agent-rails setup --tool opencode
 ```
+
+Run it from the target repository root or any subdirectory; Agent Rails resolves the Git root automatically. Pass `--project PATH` only when operating from outside the repository.
 
 `agent-rails update --mode local --session-hook` is the Claude Adapter maintenance flow; do not use it to refresh Codex or OpenCode.
 

@@ -128,8 +128,17 @@ agent-rails upgrade self
 回滚或固定到已发布版本：
 
 ```bash
-agent-rails upgrade self --version 0.6.0
+agent-rails upgrade self --version 0.6.1
 ```
+
+CLI 更新后，按实际使用的 coding agent 刷新项目接入。例如 OpenCode：
+
+```bash
+project_root="$(git rev-parse --show-toplevel)"
+agent-rails setup --project "$project_root" --tool opencode
+```
+
+`agent-rails update --mode local --session-hook` 是 Claude Adapter 维护流；不要用它刷新 Codex 或 OpenCode。
 
 ### 会不会污染业务仓库
 

@@ -58,7 +58,11 @@ test_update_dry_run_sequences_project_refresh() {
   output="$("$AGENT_RAILS_BIN" update --project "$repo" --skip-pull --skip-tests --dry-run --session-hook)"
 
   assert_contains "$output" "Agent Rails Update"
-  assert_contains "$output" "Skip git pull (--skip-pull)."
+  if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    assert_contains "$output" "Skip git pull (--skip-pull)."
+  else
+    assert_contains "$output" "Skip release download (--skip-pull)."
+  fi
   assert_contains "$output" "Skip tests (--skip-tests)."
   assert_contains "$output" "Run pre-upgrade doctor"
   assert_contains "$output" "Would run: $AGENT_RAILS_BIN doctor --project"
@@ -94,11 +98,44 @@ test_upgrade_self_only_skips_project_refresh() {
 
   assert_contains "$output" "Agent Rails Update"
   assert_contains "$output" "Mode: self"
-  assert_contains "$output" "Skip git pull (--skip-pull)."
+  if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    assert_contains "$output" "Skip git pull (--skip-pull)."
+  else
+    assert_contains "$output" "Skip release download (--skip-pull)."
+  fi
   assert_contains "$output" "Skip tests (--skip-tests)."
   assert_not_contains "$output" "Profile not found"
   assert_not_contains "$output" "Run pre-upgrade doctor"
   assert_not_contains "$output" "Refresh target adapter and skills"
+  assert_contains "$output" "Agent Rails update complete."
+}
+
+test_release_update_skips_source_only_test_suite() {
+  local release_home="$TMP_ROOT/release-update-home"
+  local marker="$TMP_ROOT/release-update-tests-ran"
+  local output
+  mkdir -p "$release_home/tests"
+  cp -R "$ROOT_DIR/bin" "$ROOT_DIR/scripts" "$release_home/"
+  cp "$ROOT_DIR/VERSION" "$release_home/VERSION"
+
+  cat > "$release_home/tests/run.sh" <<SH
+#!/usr/bin/env bash
+touch "$marker"
+exit 99
+SH
+  chmod +x "$release_home/tests/run.sh"
+
+  if ! output="$(
+    env -u AGENT_RAILS_HOME \
+      "$release_home/bin/agent-rails" upgrade self --skip-pull --dry-run 2>&1
+  )"; then
+    printf 'Expected a Release update to skip the source-only test suite.\n' >&2
+    printf 'Actual output:\n%s\n' "$output" >&2
+    return 1
+  fi
+
+  assert_file_not_exists "$marker"
+  assert_contains "$output" "Skip source test suite for verified Release installation."
   assert_contains "$output" "Agent Rails update complete."
 }
 
@@ -374,6 +411,7 @@ run_core_tests() {
   run_test test_update_dry_run_sequences_project_refresh "update dry-run sequences project refresh"
   run_test test_update_falls_back_from_missing_legacy_kit_profile "update falls back from missing legacy kit profile"
   run_test test_upgrade_self_only_skips_project_refresh "upgrade self skips project refresh"
+  run_test test_release_update_skips_source_only_test_suite "release update skips source-only test suite"
   run_test test_release_build_creates_installable_assets "release build creates installable assets"
   run_test test_release_build_handles_tar_sigpipe_behavior "release build handles tar SIGPIPE behavior"
   run_test test_release_installer_supports_non_git_self_upgrade "release install supports non-git self-upgrade"

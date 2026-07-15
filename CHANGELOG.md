@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+## 0.6.1 - 2026-07-15
+
 - Added hard token-budget Task Pack assembly with required-section floors, weighted category allocation, unused-share redistribution, exact external/Hugging Face tokenizer support, and a cached long-lived counting service.
 - Replaced OpenCode's static instruction-only integration with a project-local per-request plugin that reads the current session, derives available input space from `model.limit`, and injects a proportional Agent Rails Pack without trimming OpenCode history.
 - Removed the built-in `agent-rails eval` logger and `agent-eval` skill so the product CLI stays focused on runtime capabilities; standalone Python tools now own TUI artifact capture, mirrored blind judging, and Codex/OpenCode trajectory conversion to Run IR, OTel, and ATIF.
 - Added a durable Shell-to-Python refactor handoff with research sources, implementation status, compatibility contracts, migration gates, and the recommended first tracer bullet.
+- Fixed `agent-rails update` in GitHub Release installations so it no longer runs the source-checkout-only test suite after a checksum-verified update.
+- Added regression coverage for Release update behavior and a GitHub Actions smoke test that executes the CLI directly from the built archive.
+- Clarified that `update --mode local --session-hook` refreshes the Claude Adapter; Codex and OpenCode adapters should be refreshed with `setup --tool codex|opencode`.
 
 ## 0.6.0 - 2026-07-15
 

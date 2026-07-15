@@ -128,8 +128,17 @@ agent-rails upgrade self
 Roll back or pin to a published version:
 
 ```bash
-agent-rails upgrade self --version 0.6.0
+agent-rails upgrade self --version 0.6.1
 ```
+
+After updating the CLI, refresh the project integration for the coding agent you actually use. For OpenCode:
+
+```bash
+project_root="$(git rev-parse --show-toplevel)"
+agent-rails setup --project "$project_root" --tool opencode
+```
+
+`agent-rails update --mode local --session-hook` is the Claude Adapter maintenance flow; do not use it to refresh Codex or OpenCode.
 
 ### Will it pollute the business repository?
 

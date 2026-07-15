@@ -38,6 +38,26 @@ jobs:
       - name: Build release assets
         run: bash scripts/build-release.sh --output dist
 
+      - name: Smoke test built release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk 'NF { print $1; exit }' VERSION)"
+          smoke_root="$(mktemp -d)"
+          trap 'rm -rf "$smoke_root"' EXIT
+          tar -xzf dist/agent-rails.tar.gz -C "$smoke_root"
+          release_home="$smoke_root/agent-rails-$version"
+          env -u AGENT_RAILS_HOME "$release_home/bin/agent-rails" --version
+          output="$(
+            env -u AGENT_RAILS_HOME \
+              "$release_home/bin/agent-rails" upgrade self --skip-pull --dry-run
+          )"
+          if [[ "$output" != *"Skip source test suite for verified Release installation."* ]]; then
+            printf 'Built release did not use the Release update path.\n' >&2
+            printf '%s\n' "$output" >&2
+            exit 1
+          fi
+
       - name: Verify release checksum
         working-directory: dist
         run: sha256sum -c agent-rails.tar.gz.sha256

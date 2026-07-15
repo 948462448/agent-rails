@@ -93,7 +93,7 @@ agent-rails upgrade self [--version VERSION] [--repository OWNER/REPO] \
   [--install-root PATH] [--bin-dir PATH] [--skip-tests] [--dry-run]
 ```
 
-`agent-rails update` 是更宽的维护流程：更新 kit 后，还会按参数运行测试、目标项目 Doctor 和 Adapter 刷新。源码 checkout 继续使用 `git pull --ff-only`；Release 安装下载归档并校验 SHA-256 后原子切换版本。`--skip-pull` 在两种安装模式下都表示跳过 kit 本身的更新。
+`agent-rails update` 是 Claude Adapter 的较宽维护流程：更新 kit 后，还会按参数运行目标项目 Doctor 和 Claude Adapter 刷新。源码 checkout 继续使用 `git pull --ff-only` 并运行源码测试；Release 安装下载归档、校验 SHA-256、原子切换版本，并跳过不适用于归档安装的源码测试。Codex 或 OpenCode 使用 `agent-rails setup --project PATH --tool codex|opencode` 刷新。`--skip-pull` 在两种安装模式下都表示跳过 kit 本身的更新。
 
 ## Profile 与项目边界
 

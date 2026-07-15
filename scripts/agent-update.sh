@@ -13,7 +13,8 @@ Update source depends on how the kit was installed:
   GitHub Release   verified release archive + atomic version switch
 
 `upgrade self` updates only the kit and does not require a target project.
-`update` also runs tests, Doctor, and the target adapter refresh unless skipped.
+`update` runs source tests only for a Git checkout, then Doctor and the Claude
+adapter refresh unless skipped. Refresh Codex or OpenCode with `setup --tool`.
 USAGE
 }
 
@@ -318,6 +319,8 @@ fi
 
 if [[ "$skip_tests" -eq 1 ]]; then
   printf '\nSkip tests (--skip-tests).\n'
+elif ! kit_is_git_checkout; then
+  printf '\nSkip source test suite for verified Release installation.\n'
 else
   run_step "Run Agent Rails tests" bash "$AGENT_RAILS_HOME/tests/run.sh"
 fi

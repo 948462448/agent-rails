@@ -36,7 +36,7 @@ jobs:
         run: bash tests/run.sh
 
       - name: Build release assets
-        run: bash scripts/build-release.sh --output dist
+        run: AGENT_RAILS_HOME="$PWD" python3 -I scripts/agent-python-cli.py release-build --output dist
 
       - name: Smoke test built release
         shell: bash
@@ -48,7 +48,16 @@ jobs:
           tar -xzf dist/agent-rails.tar.gz -C "$smoke_root"
           release_home="$smoke_root/agent-rails-$version"
           project="$smoke_root/project"
+          installer_smoke="$smoke_root/installer"
           mkdir -p "$project"
+          mkdir -p "$installer_smoke"
+          cp dist/install.sh dist/release_install.py "$installer_smoke/"
+          installer_output="$(cd "$installer_smoke" && bash ./install.sh --dry-run)"
+          if [[ "$installer_output" != *"Would download:"* || "$installer_output" != *"Would verify:"* ]]; then
+            printf 'Built standalone installer assets did not run together.\n' >&2
+            printf '%s\n' "$installer_output" >&2
+            exit 1
+          fi
           git -C "$project" init -q
           env -u AGENT_RAILS_HOME "$release_home/bin/agent-rails" --version
           output="$(
@@ -82,6 +91,7 @@ jobs:
             dist/agent-rails.tar.gz \
             dist/agent-rails.tar.gz.sha256 \
             dist/install.sh \
+            dist/release_install.py \
             --verify-tag \
             --generate-notes \
             --title "Agent Rails $GITHUB_REF_NAME"

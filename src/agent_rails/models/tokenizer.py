@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
@@ -32,12 +32,16 @@ class TokenCounter:
         command: str = "",
         tokenizer_path: str = "",
         tiktoken_encoding: str = "cl100k_base",
+        working_directory: Path | None = None,
+        environment: Mapping[str, str] | None = None,
     ) -> None:
         self.requested_mode = mode
         self.chars_per_token = max(1, chars_per_token)
         self.command = command
         self.tokenizer_path = tokenizer_path
         self.tiktoken_encoding = tiktoken_encoding
+        self.working_directory = working_directory
+        self.environment = None if environment is None else dict(environment)
         self._auto_mode = mode == "auto"
         self.cache: dict[tuple[str, str], int] = {}
         self.cache_hits = 0
@@ -135,7 +139,11 @@ class TokenCounter:
             with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
                 handle.write(text)
                 path = handle.name
-            env = os.environ.copy()
+            env = (
+                os.environ.copy()
+                if self.environment is None
+                else dict(self.environment)
+            )
             env["AGENT_RAILS_TOKENIZER_INPUT"] = path
             result = subprocess.run(
                 self.command,
@@ -144,6 +152,7 @@ class TokenCounter:
                 capture_output=True,
                 text=True,
                 env=env,
+                cwd=self.working_directory,
             )
             raw = result.stdout.strip()
             if not raw.isdigit():

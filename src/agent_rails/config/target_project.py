@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import subprocess
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 from agent_rails.core.paths import (
     AgentRailsPaths,
@@ -61,6 +61,7 @@ class TargetProjectContext:
     worktree_slug: str
     task_pack_path: str
     profile_values: Mapping[str, str]
+    profile_environment: Mapping[str, str]
 
     def shell_values(self) -> Mapping[str, str]:
         values = dict(self.profile_values)
@@ -90,24 +91,30 @@ def resolve_target_project(
     require_profile: bool = False,
     load_profile: bool = True,
     load_environment_file: bool = False,
+    profile_variables: Sequence[str] = (),
+    capture_profile_environment: bool = False,
 ) -> TargetProjectContext:
     env = dict(os.environ if environment is None else environment)
     if not requested_path.is_dir():
         raise TargetProjectError(f"Project directory not found: {requested_path}")
 
-    project_root, is_git_repo = _resolve_project_root(requested_path, env)
+    project_root, is_git_repo = resolve_project_root_identity(requested_path, env)
     default_name = project_root.name
     paths = AgentRailsPaths.from_environment(kit_home, env)
     profile_path = paths.resolve_profile(project_root, default_name, explicit_profile)
     worktree_slug_preset = env.get("PROJECT_WORKTREE_SLUG", "")
 
     profile_values: Mapping[str, str] = {}
+    profile_environment: Mapping[str, str] = {}
     profile_status = "unloaded"
     profile_exists = Path(profile_path).is_file()
     if require_profile and not profile_exists:
         raise FileNotFoundError(str(profile_path))
 
     if load_profile and profile_exists:
+        profile_load_path = Path(profile_path)
+        if not profile_load_path.is_absolute():
+            profile_load_path = Path(os.path.abspath(profile_load_path))
         profile_env = dict(env)
         profile_env["AGENT_RAILS_CONFIG_HOME"] = (
             env.get("AGENT_RAILS_CONFIG_HOME") or paths.config_home
@@ -116,12 +123,17 @@ def resolve_target_project(
         profile_env["PROJECT_ROOT"] = str(project_root)
         profile_env["PROJECT_NAME"] = env.get("PROJECT_NAME") or default_name
         loaded = load_shell_profile(
-            Path(profile_path),
+            profile_load_path,
             environment=profile_env,
-            variables=TARGET_PROFILE_VARIABLES,
+            variables=tuple(
+                dict.fromkeys((*TARGET_PROFILE_VARIABLES, *profile_variables))
+            ),
             env_file_variable="AGENT_RAILS_ENV_FILE" if load_environment_file else None,
+            working_directory=project_root,
+            capture_exported_environment=capture_profile_environment,
         )
         profile_values = loaded.values
+        profile_environment = loaded.exported_environment
         profile_status = "loaded"
     elif not profile_exists:
         profile_status = "missing"
@@ -150,12 +162,21 @@ def resolve_target_project(
         worktree_slug=worktree_slug,
         task_pack_path=task_pack_path,
         profile_values=profile_values,
+        profile_environment=profile_environment,
     )
 
 
-def _resolve_project_root(
+def resolve_project_root_identity(
     requested_path: Path, environment: Mapping[str, str]
 ) -> tuple[Path, bool]:
+    """Return the canonical project identity used by Target Project resolution.
+
+    A path anywhere inside one Git worktree identifies that worktree's top-level
+    directory.  A nested Git repository therefore keeps its own identity instead
+    of being accepted as part of its parent repository.  Repository-discovery
+    environment variables are removed so callers cannot redirect the identity.
+    """
+
     requested = canonical_path(requested_path)
     git_environment = dict(environment)
     for variable in _GIT_REPOSITORY_ENVIRONMENT:

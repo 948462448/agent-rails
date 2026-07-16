@@ -1,6 +1,6 @@
 # GitHub Release Distribution
 
-Agent Rails is a multi-file shell kit, not a standalone binary. A Release therefore ships one complete kit archive instead of a wrapper that still depends on a source checkout.
+Agent Rails is a multi-file Python kit with small host bootstraps, not a standalone binary. A Release therefore ships one complete kit archive instead of a wrapper that still depends on a source checkout.
 
 This document defines the Release-specific contract. For the complete runtime architecture and update flow, see [How Agent Rails Works](./how-agent-rails-works.en.md) or [Agent Rails 工作原理](./how-agent-rails-works.zh-CN.md).
 
@@ -10,11 +10,14 @@ Every GitHub Release contains fixed asset names:
 
 - `agent-rails.tar.gz`: the Git-metadata-free kit under `agent-rails-<version>/`.
 - `agent-rails.tar.gz.sha256`: the archive digest consumed by the installer.
-- `install.sh`: the standalone installer, copied from `scripts/agent-release-install.sh`.
+- `install.sh`: the cold-start Shell bootstrap, copied from `scripts/agent-release-install.sh`.
+- `release_install.py`: the standalone standard-library installer that owns download, validation, extraction, rollback, and symlink policy.
 
 Fixed asset names make the GitHub `/releases/latest/download/...` redirect usable without a JSON parser. The version still lives inside the archive's `VERSION` file and in the Release tag.
 
 The installer downloads both archive and digest before mutating the active install. It rejects checksum mismatches, unsafe archive paths, version mismatches, malformed existing release directories, and user-authored non-symlink `current` or CLI paths.
+
+The Builder safely unpacks its final archive and imports the complete CLI before publication. Asset publication is no-clobber and transactional; if an old asset cannot be restored, its private recovery directory is retained instead of being deleted.
 
 ## Local layout and switching
 
@@ -39,7 +42,9 @@ Initial installation does not need `git clone`:
 ```bash
 curl -fsSL https://github.com/948462448/agent-rails/releases/latest/download/install.sh \
   -o /tmp/agent-rails-install.sh
-less /tmp/agent-rails-install.sh
+curl -fsSL https://github.com/948462448/agent-rails/releases/latest/download/release_install.py \
+  -o /tmp/release_install.py
+less /tmp/agent-rails-install.sh /tmp/release_install.py
 bash /tmp/agent-rails-install.sh
 ```
 

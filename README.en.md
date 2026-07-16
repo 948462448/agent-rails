@@ -14,7 +14,7 @@ Agent Rails is a personal, local guardrail for Claude Code, Codex, and OpenCode.
 
 ## Start in Five Minutes
 
-Prerequisites: Git, Bash, and at least one of Claude Code, Codex, or OpenCode. Claude's startup hook also requires Python 3.
+Prerequisites: Git, Bash, Python 3.9+, and at least one of Claude Code, Codex, or OpenCode.
 
 ### 1. Install the CLI without cloning
 
@@ -23,7 +23,9 @@ Download the installer, inspect it, and then run it:
 ```bash
 curl -fsSL https://github.com/948462448/agent-rails/releases/latest/download/install.sh \
   -o /tmp/agent-rails-install.sh
-less /tmp/agent-rails-install.sh
+curl -fsSL https://github.com/948462448/agent-rails/releases/latest/download/release_install.py \
+  -o /tmp/release_install.py
+less /tmp/agent-rails-install.sh /tmp/release_install.py
 bash /tmp/agent-rails-install.sh
 "$HOME/.local/bin/agent-rails" init
 ```

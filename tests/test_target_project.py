@@ -74,27 +74,52 @@ class PathsTest(unittest.TestCase):
                 str(paths.default_profile_path),
             )
 
-    def test_worktree_slug_matches_compatibility_shell(self) -> None:
+    def test_worktree_slug_is_stable_and_path_specific(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-slug-") as temp_dir:
             root = Path(temp_dir).resolve()
-            shell = subprocess.run(
-                [
-                    "bash",
-                    "-c",
-                    'source "$1"; agent_rails_project_worktree_slug "$2" "$3"',
-                    "bash",
-                    str(ROOT / "scripts" / "agent-paths.sh"),
-                    str(root),
-                    "Mixed Project",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            self.assertEqual(project_worktree_slug(root, "Mixed Project"), shell)
+            first = project_worktree_slug(root, "Mixed Project")
+            second = project_worktree_slug(root, "Mixed Project")
+            other = project_worktree_slug(root / "other", "Mixed Project")
+            self.assertEqual(first, second)
+            self.assertTrue(first.startswith("mixed-project-"))
+            self.assertNotEqual(first, other)
 
 
 class TargetProjectContextTest(unittest.TestCase):
+    def test_profile_and_env_file_execute_from_canonical_project_root(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-profile-cwd-") as temp_dir:
+            temp = Path(temp_dir)
+            repo = temp / "repo"
+            nested = repo / "nested" / "path"
+            config = repo / "config"
+            nested.mkdir(parents=True)
+            config.mkdir()
+            subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+            (config / "helper.profile").write_text(
+                'PROJECT_NAME="profile-root"\n', encoding="utf-8"
+            )
+            (config / "pack.env").write_text(
+                'PROJECT_NAME="env-root"\n', encoding="utf-8"
+            )
+            profile = temp / "target.profile"
+            profile.write_text(
+                'source "config/helper.profile"\n'
+                'AGENT_RAILS_ENV_FILE="config/pack.env"\n',
+                encoding="utf-8",
+            )
+
+            context = resolve_target_project(
+                nested,
+                kit_home=ROOT,
+                explicit_profile=str(profile),
+                environment=dict(os.environ),
+                require_profile=True,
+                load_environment_file=True,
+            )
+
+            self.assertEqual(context.root, repo.resolve())
+            self.assertEqual(context.project_name, "env-root")
+
     def test_git_root_ignores_inherited_repository_environment(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-git-env-") as temp_dir:
             temp = Path(temp_dir)
@@ -197,6 +222,63 @@ printf '%s\n' "$PROJECT_NAME"
             self.assertEqual(context.project_name, "finalized-project")
             self.assertEqual(context.worktree_slug, "initial-worktree")
             self.assertEqual(context.task_pack_path, str(explicit_pack))
+
+    def test_context_only_exports_explicit_additional_profile_variables(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-context-fields-") as temp_dir:
+            temp = Path(temp_dir)
+            project = temp / "project"
+            project.mkdir()
+            profile = temp / "target.profile"
+            profile.write_text(
+                '\n'.join(
+                    [
+                        'ADAPTER_SETTING="safe adapter value"',
+                        'UNREQUESTED_TOKEN="must-not-cross-the-seam"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            context = resolve_target_project(
+                project,
+                kit_home=ROOT,
+                explicit_profile=str(profile),
+                environment=dict(os.environ),
+                require_profile=True,
+                profile_variables=("ADAPTER_SETTING",),
+            )
+
+            self.assertEqual(context.profile_values["ADAPTER_SETTING"], "safe adapter value")
+            self.assertNotIn("UNREQUESTED_TOKEN", context.profile_values)
+            self.assertEqual(context.shell_values()["ADAPTER_SETTING"], "safe adapter value")
+
+    def test_target_context_cli_rejects_invalid_profile_variable_names(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-context-field-name-") as temp_dir:
+            project = Path(temp_dir) / "project"
+            project.mkdir()
+            completed = subprocess.run(
+                [
+                    "python3",
+                    "-E",
+                    str(ROOT / "scripts" / "agent-python-cli.py"),
+                    "target-context",
+                    "--project",
+                    str(project),
+                    "--agent-rails-home",
+                    str(ROOT),
+                    "--profile-variable",
+                    "INVALID-NAME",
+                    "--shell",
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "Invalid Profile variable name: INVALID-NAME", completed.stderr
+            )
 
     def test_nested_git_profile_and_env_file_finalize_in_order(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-target-") as temp_dir:

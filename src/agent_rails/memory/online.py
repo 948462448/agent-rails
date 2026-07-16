@@ -49,6 +49,7 @@ class OnlineMemoryQuery:
     project: str
     limit: int
     timeout_seconds: int = 8
+    working_directory: Optional[Path] = None
 
 
 def query_online_memory(
@@ -96,6 +97,7 @@ def query_online_memory(
                 str(status_write),
             ],
             env=adapter_env,
+            cwd=query.working_directory,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

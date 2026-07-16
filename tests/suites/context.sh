@@ -1,70 +1,5 @@
 # Task Pack, memory, profile, and project-context tests.
 
-test_target_project_context_module_contract() {
-  local repo="$TMP_ROOT/target-project-context"
-  local nested="$repo/nested/path"
-  local profile="$TMP_ROOT/target-project-context.profile"
-  local missing_profile="$TMP_ROOT/missing-target-project-context.profile"
-  local config_home="$TMP_ROOT/target-project-context-home"
-  local repo_abs expected_slug output
-  mkdir -p "$nested"
-  git -C "$repo" init -q
-  printf '# target project\n' > "$repo/README.md"
-  git -C "$repo" add README.md
-  git_commit "$repo" init
-  repo_abs="$(cd "$repo" && pwd -P)"
-  {
-    printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
-    printf 'PROJECT_NAME="profile-project"\n'
-    printf 'AGENT_RAILS_CONFIG_HOME="%s"\n' "$config_home"
-  } > "$profile"
-
-  (
-    unset PROJECT_ROOT PROJECT_NAME PROJECT_WORKTREE_SLUG TASK_PACK_PATH
-    AGENT_RAILS_HOME="$ROOT_DIR"
-    # shellcheck source=scripts/agent-paths.sh
-    source "$ROOT_DIR/scripts/agent-paths.sh"
-    # shellcheck source=scripts/agent-target-project.sh
-    source "$ROOT_DIR/scripts/agent-target-project.sh"
-
-    unset AGENT_TARGET_PROJECT_PROFILE_PATH
-    if output="$(agent_target_project_load_profile 2>&1)"; then
-      printf 'Expected Profile loading before Target Project resolution to fail.\n' >&2
-      exit 1
-    fi
-    assert_contains "$output" "Resolve a Target Project before loading its Profile."
-
-    agent_target_project_resolve "$nested" "$profile"
-    [[ "$AGENT_TARGET_PROJECT_ROOT" == "$repo_abs" ]]
-    [[ "$AGENT_TARGET_PROJECT_DEFAULT_NAME" == "target-project-context" ]]
-    [[ "$AGENT_TARGET_PROJECT_PROFILE_PATH" == "$profile" ]]
-    [[ "$AGENT_TARGET_PROJECT_IS_GIT_REPO" -eq 1 ]]
-    [[ "$AGENT_TARGET_PROJECT_PROFILE_STATUS" == "unloaded" ]]
-
-    agent_target_project_load_profile
-    expected_slug="$(agent_rails_project_worktree_slug "$repo_abs" "profile-project")"
-    [[ "$PROJECT_ROOT" == "$repo_abs" ]]
-    [[ "$PROJECT_NAME" == "profile-project" ]]
-    [[ "$PROJECT_WORKTREE_SLUG" == "$expected_slug" ]]
-    [[ "$AGENT_TARGET_PROJECT_PROFILE_STATUS" == "loaded" ]]
-    [[ "$AGENT_TARGET_PROJECT_TASK_PACK_PATH" == "$config_home/agent-context/$expected_slug-task-pack.md" ]]
-
-    unset PROJECT_ROOT PROJECT_NAME PROJECT_WORKTREE_SLUG TASK_PACK_PATH
-    PROJECT_WORKTREE_SLUG="explicit-worktree"
-    agent_target_project_resolve "$repo" "$profile"
-    agent_target_project_load_profile
-    [[ "$PROJECT_WORKTREE_SLUG" == "explicit-worktree" ]]
-
-    unset PROJECT_ROOT PROJECT_NAME PROJECT_WORKTREE_SLUG TASK_PACK_PATH
-    agent_target_project_resolve "$repo" "$missing_profile"
-    if agent_target_project_load_profile; then
-      printf 'Expected a missing Target Project Profile to fail.\n' >&2
-      exit 1
-    fi
-    [[ "$AGENT_TARGET_PROJECT_PROFILE_STATUS" == "missing" ]]
-  )
-}
-
 test_pack_uses_python_target_context_without_reloading_profile() {
   local repo="$TMP_ROOT/pack-python-target-context"
   local nested="$repo/nested/path"
@@ -343,6 +278,7 @@ test_memory_suggest_write_local_card() {
   local profile="$TMP_ROOT/memory-write.profile"
   local memory_dir="$TMP_ROOT/memory-write-cards"
   local decision_path="$TMP_ROOT/memory-write-decision.md"
+  local pack_output="$TMP_ROOT/memory-write-task-pack.md"
   local output
   mkdir -p "$repo" "$memory_dir"
   git -C "$repo" init -q
@@ -375,6 +311,67 @@ test_memory_suggest_write_local_card() {
   assert_file_contains "$memory_dir/backend-auth-probe.md" '  - "auth readiness"'
   assert_file_contains "$memory_dir/backend-auth-probe.md" "Use checkpreload.htm as the first readiness probe"
   assert_file_contains "$memory_dir/backend-auth-probe.md" "curl checkpreload.htm first"
+
+  "$AGENT_RAILS_BIN" pack --project "$repo" --profile "$profile" \
+    --output "$pack_output" "auth readiness" >/dev/null
+  assert_file_contains "$pack_output" "Use checkpreload.htm as the first readiness probe"
+}
+
+test_memory_suggest_uses_python_target_context_once() {
+  local repo="$TMP_ROOT/memory-python-target-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/memory-python-target-context.profile"
+  local missing_profile="$TMP_ROOT/memory-python-target-context-missing.profile"
+  local profile_count="$TMP_ROOT/memory-python-target-context-profile-count"
+  local memory_dir="$TMP_ROOT/memory-python-target-context-cards"
+  local decision_path="$TMP_ROOT/memory-python-target-context-decision.md"
+  local shadow_marker="$TMP_ROOT/memory-python-target-context-shadow-marker"
+  local output status
+  mkdir -p "$nested"
+  repo="$(cd "$repo" && pwd -P)"
+  nested="$repo/nested/path"
+  git -C "$repo" init -q
+  printf '# Memory Python Target Project Context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'count=0\n'
+    printf '[[ ! -f "%s" ]] || count="$(cat "%s")"\n' "$profile_count" "$profile_count"
+    printf 'printf "%%s\\n" "$((count + 1))" > "%s"\n' "$profile_count"
+    printf 'PROJECT_NAME="memory-python-context"\n'
+    printf 'MEMORY_LOCAL_DIR="%s"\n' "$memory_dir"
+  } > "$profile"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" memory suggest \
+        --project "$nested" \
+        --profile "$profile" \
+        --output "$decision_path" \
+        --decision keep \
+        --write-local \
+        --title "Python context card" \
+        "Target Project Context is resolved by Python.")"
+
+  assert_contains "$output" "Wrote local memory $memory_dir/python-context-card.md"
+  assert_file_contains "$decision_path" "Project path: \`$nested\`"
+  assert_file_contains "$memory_dir/python-context-card.md" "Target Project Context is resolved by Python."
+  [[ "$(cat "$profile_count")" -eq 1 ]]
+  assert_file_not_exists "$shadow_marker"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" memory suggest \
+    --project "$repo" \
+    --profile "$missing_profile" \
+    --output "$decision_path" \
+    --decision skip 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Profile not found: $missing_profile"
 }
 
 test_pack_includes_changed_file_excerpts() {
@@ -510,6 +507,81 @@ test_pack_sorts_changed_files_by_goal() {
     sed -n '/## Changed File Priority/,/## Changed File Excerpts/p' "$content_output" >&2
     exit 1
   fi
+}
+
+test_pack_pins_explicit_target_sha_across_evidence_consumers() {
+  local repo="$TMP_ROOT/pack-pinned-target"
+  local profile="$TMP_ROOT/pack-pinned-target.profile"
+  local output="$TMP_ROOT/pack-pinned-target.md"
+  local git_wrapper_dir="$TMP_ROOT/pack-pinned-target-git"
+  local moved_marker="$TMP_ROOT/pack-pinned-target-ref-moved"
+  local real_git base_sha target_sha moved_sha
+  mkdir -p "$repo" "$git_wrapper_dir"
+  git -C "$repo" init -q
+  printf '# base\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" base
+  base_sha="$(git -C "$repo" rev-parse HEAD)"
+
+  mkdir -p "$repo/docs" "$repo/scripts"
+  printf '# target docs\n' > "$repo/docs/target.md"
+  printf '#!/usr/bin/env bash\nprintf "target\n"\n' > "$repo/scripts/target.sh"
+  git -C "$repo" add docs/target.md scripts/target.sh
+  git_commit "$repo" target
+  target_sha="$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" branch moving-target "$target_sha"
+
+  git -C "$repo" checkout -q -b moved-target "$base_sha"
+  printf '# moved elsewhere\n' > "$repo/moved.md"
+  git -C "$repo" add moved.md
+  git_commit "$repo" moved
+  moved_sha="$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" checkout -q --detach "$base_sha"
+
+  {
+    printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
+    printf 'PROJECT_NAME="pack-pinned-target"\n'
+    printf 'ENTRY_DOC_ROOT="docs/target.md"\n'
+  } > "$profile"
+
+  real_git="$(command -v git)"
+  cat > "$git_wrapper_dir/git" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+is_cat_file=0
+is_entry_doc_lookup=0
+for argument in "$@"; do
+  [[ "$argument" != "cat-file" ]] || is_cat_file=1
+  [[ "$argument" != *:docs/target.md ]] || is_entry_doc_lookup=1
+done
+if [[ "$is_cat_file" -eq 1 && "$is_entry_doc_lookup" -eq 1 && ! -e "$PACK_MOVE_MARKER" ]]; then
+  "$PACK_REAL_GIT" -C "$PACK_MOVE_REPO" update-ref "$PACK_MOVE_REF" "$PACK_MOVE_SHA"
+  : > "$PACK_MOVE_MARKER"
+fi
+exec "$PACK_REAL_GIT" "$@"
+WRAPPER
+  chmod +x "$git_wrapper_dir/git"
+
+  PATH="$git_wrapper_dir:$PATH" \
+    PACK_REAL_GIT="$real_git" \
+    PACK_MOVE_REPO="$repo" \
+    PACK_MOVE_REF="refs/heads/moving-target" \
+    PACK_MOVE_SHA="$moved_sha" \
+    PACK_MOVE_MARKER="$moved_marker" \
+    "$AGENT_RAILS_BIN" pack \
+      --project "$repo" \
+      --profile "$profile" \
+      --base "$base_sha" \
+      --target-ref moving-target \
+      --output "$output" \
+      --pack-mode lite \
+      "pin explicit target" >/dev/null
+
+  assert_file_exists "$moved_marker"
+  [[ "$(git -C "$repo" rev-parse moving-target)" == "$moved_sha" ]]
+  assert_file_contains "$output" "docs/target.md\` (root, at $target_sha)"
+  assert_file_contains "$output" '[shell entrypoints changed] bash -n scripts/target.sh'
+  assert_file_not_contains "$output" "moved.md"
 }
 
 test_pack_falls_back_from_missing_legacy_kit_profile() {
@@ -690,6 +762,21 @@ test_context_assembler_server_caches_token_counts() {
   local counter="$TMP_ROOT/tokenizer-counter.sh"
   local count_file="$TMP_ROOT/tokenizer-counter.count"
   local result="$TMP_ROOT/tokenizer-server-result.json"
+  local target_project="$TMP_ROOT/tokenizer-server-target"
+  local shadow_marker="$TMP_ROOT/tokenizer-server-shadow-marker"
+  mkdir -p "$target_project/agent_rails"
+  cat > "$target_project/sitecustomize.py" <<'PYTHON'
+import os
+from pathlib import Path
+
+Path(os.environ["AGENT_RAILS_SHADOW_MARKER"]).write_text("sitecustomize executed\n")
+PYTHON
+  cat > "$target_project/agent_rails/__init__.py" <<'PYTHON'
+import os
+from pathlib import Path
+
+Path(os.environ["AGENT_RAILS_SHADOW_MARKER"]).write_text("shadow package executed\n")
+PYTHON
   cat > "$counter" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -701,14 +788,25 @@ wc -c < "$AGENT_RAILS_TOKENIZER_INPUT" | tr -d '[:space:]'
 SCRIPT
   chmod +x "$counter"
 
-  TOKENIZER_COUNT_FILE="$count_file" python3 - "$ROOT_DIR/scripts/agent-context-assemble.py" "$counter" "$result" <<'PY'
+  TOKENIZER_COUNT_FILE="$count_file" python3 - \
+    "$ROOT_DIR/scripts/agent-context-assemble.py" \
+    "$counter" \
+    "$result" \
+    "$target_project" \
+    "$shadow_marker" <<'PY'
 import json
+import os
+from pathlib import Path
 import subprocess
 import sys
 
-assembler, counter, result = sys.argv[1:]
+assembler, counter, result, target_project, shadow_marker = sys.argv[1:]
+env = os.environ.copy()
+env.update({"PYTHONPATH": ".", "AGENT_RAILS_SHADOW_MARKER": shadow_marker})
 proc = subprocess.Popen(
-    [sys.executable, assembler, "--serve", "--tokenizer", "command", "--tokenizer-command", counter],
+    [sys.executable, "-I", assembler, "--serve", "--tokenizer", "command", "--tokenizer-command", counter],
+    cwd=target_project,
+    env=env,
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     text=True,
@@ -723,10 +821,132 @@ proc.terminate()
 proc.wait(timeout=5)
 with open(result, "w", encoding="utf-8") as handle:
     json.dump(responses, handle)
+if Path(shadow_marker).exists():
+    raise SystemExit("isolated assembler executed Target Project Python startup code")
 PY
 
   [[ "$(cat "$count_file")" -eq 1 ]]
   assert_file_contains "$result" '"cache_hit": true'
+  assert_file_not_exists "$shadow_marker"
+}
+
+test_python_context_assembler_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_context_assembler.py"
+}
+
+test_python_pack_policy_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_pack_policy.py"
+}
+
+test_python_change_evidence_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_change_evidence.py"
+}
+
+test_python_memory_evidence_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_memory_evidence.py"
+  )
+}
+
+test_python_project_docs_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_project_docs.py"
+  )
+}
+
+test_python_contract_sections_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_contract_sections.py"
+  )
+}
+
+test_python_pack_renderer_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_pack_renderer.py"
+  )
+}
+
+test_python_context_markdown_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_context_markdown.py"
+  )
+}
+
+test_python_pack_application_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_pack_application.py"
+  )
+}
+
+test_python_private_text_publisher_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_private_text.py"
+  )
+}
+
+test_python_memory_suggestion_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_memory_suggestion.py"
+  )
+}
+
+test_pack_does_not_expose_internal_bootstrap_overrides() {
+  local repo="$TMP_ROOT/pack-bootstrap-boundary"
+  local output="$TMP_ROOT/pack-bootstrap-boundary.md"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# bootstrap boundary\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  "$AGENT_RAILS_BIN" pack \
+    --project "$repo" \
+    --output "$output" \
+    --agent-rails-home /definitely-not-the-kit \
+    "bootstrap boundary" >/dev/null
+
+  assert_file_exists "$output"
+  assert_file_contains "$output" "--agent-rails-home /definitely-not-the-kit bootstrap boundary"
+}
+
+test_pack_contract_rules_cannot_forge_sections() {
+  local repo="$TMP_ROOT/pack-contract-control"
+  local output="$TMP_ROOT/pack-contract-control.md"
+  local memory_heading_count
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+
+  AGENT_RAILS_TRIGGER_RULES=$'safe\r## Memory Cards\n## forged\u2028tail\u200b' \
+    "$AGENT_RAILS_BIN" pack \
+      --project "$repo" \
+      --output "$output" \
+      "contract control characters" >/dev/null
+
+  assert_file_contains "$output" 'safe\x0d## Memory Cards'
+  assert_file_contains "$output" '## forged\u2028tail\u200b'
+  memory_heading_count="$(grep -c '^## Memory Cards$' "$output")"
+  [[ "$memory_heading_count" -eq 1 ]]
+  if grep -Fxq -- '## forged' "$output"; then
+    printf 'Contract rule forged a top-level Task Pack section.\n' >&2
+    exit 1
+  fi
 }
 
 test_pack_token_budget_uses_token_assembler() {
@@ -754,6 +974,40 @@ test_pack_token_budget_uses_token_assembler() {
   assert_file_contains "$output" "## Goal"
   assert_file_contains "$output" "token aware pack"
   assert_file_contains "$output" "Token allocator:"
+}
+
+test_pack_tiny_token_budget_preserves_existing_complete_pack() {
+  local repo="$TMP_ROOT/pack-tiny-token-budget"
+  local output="$TMP_ROOT/pack-tiny-token-budget.md"
+  local command_output exit_code
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf 'existing complete task pack\n' > "$output"
+
+  set +e
+  command_output="$(
+    AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE=1 \
+      "$AGENT_RAILS_BIN" pack \
+        --project "$repo" \
+        --output "$output" \
+        --token-budget 10 \
+        --tokenizer char \
+        "reject incomplete pack" 2>&1
+  )"
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -ne 0 ]]
+  assert_not_contains "$command_output" "Wrote $output"
+  assert_contains "$command_output" "below required section structure minimum"
+  [[ "$(cat "$output")" == "existing complete task pack" ]]
+  if compgen -G "$(dirname "$output")/.agent-rails-task-pack.*" >/dev/null; then
+    printf 'Expected failed tiny-budget Pack to clean staging files.\n' >&2
+    exit 1
+  fi
 }
 
 test_pack_candidate_output_defers_hard_budget_to_request_hook() {
@@ -1124,7 +1378,6 @@ test_run_uses_user_agent_rails_profile() {
 }
 
 run_context_tests() {
-  run_test test_target_project_context_module_contract "shared Target Project Context module contract"
   run_test test_pack_uses_python_target_context_without_reloading_profile "pack uses Python Target Project Context without reloading Profile"
   run_test test_pack_preserves_pre_profile_worktree_slug_precedence "pack preserves pre-Profile worktree slug precedence"
   run_test test_claude_commands_use_current_worktree_root "claude commands use current worktree root"
@@ -1133,11 +1386,13 @@ run_context_tests() {
   run_test test_pack_uses_provider_neutral_online_memory_adapter "pack uses provider-neutral online memory Adapter"
   run_test test_memory_suggest_skip_records_decision_only "memory suggest skip records decision only"
   run_test test_memory_suggest_write_local_card "memory suggest writes local card"
+  run_test test_memory_suggest_uses_python_target_context_once "memory suggest uses Python Target Project Context once"
   run_test test_pack_includes_changed_file_excerpts "pack includes changed file excerpts"
   run_test test_pack_excerpts_prioritize_changed_hunks "pack excerpts prioritize changed hunks"
   run_test test_pack_redacts_sensitive_changed_hunks "pack redacts sensitive changed hunks"
   run_test test_pack_truncation_preserves_utf8 "pack truncation preserves UTF-8"
   run_test test_pack_sorts_changed_files_by_goal "pack sorts changed files by goal"
+  run_test test_pack_pins_explicit_target_sha_across_evidence_consumers "pack pins explicit target SHA across evidence consumers"
   run_test test_pack_falls_back_from_missing_legacy_kit_profile "pack falls back from missing legacy kit profile"
   run_test test_pack_rejects_missing_non_kit_profile "pack rejects missing non-kit profile"
   run_test test_pack_fails_closed_when_output_cannot_be_replaced "pack fails closed when output cannot be replaced"
@@ -1146,7 +1401,21 @@ run_context_tests() {
   run_test test_pack_uses_deepseek_model_preset_budget "pack uses deepseek model preset budget"
   run_test test_context_assembler_enforces_token_budget_and_redistributes_unused_shares "context assembler enforces token budget and redistributes unused shares"
   run_test test_context_assembler_server_caches_token_counts "context assembler server caches token counts"
+  run_test test_python_context_assembler_module "Python Context Budget Assembler module"
+  run_test test_python_pack_policy_module "Python Task Pack Policy module"
+  run_test test_python_change_evidence_module "Python Task Pack Change Evidence module"
+  run_test test_python_memory_evidence_module "Python Task Pack Memory Evidence module"
+  run_test test_python_project_docs_module "Python Task Pack Project Docs module"
+  run_test test_python_contract_sections_module "Python Task Pack Contract Sections module"
+  run_test test_python_pack_renderer_module "Python Final Task Pack Renderer module"
+  run_test test_python_context_markdown_module "Python Task Pack Markdown Interface"
+  run_test test_python_pack_application_module "Python Task Pack Application Service"
+  run_test test_python_private_text_publisher_module "Python Private Text Publisher module"
+  run_test test_python_memory_suggestion_module "Python Memory Suggestion Application Service"
+  run_test test_pack_does_not_expose_internal_bootstrap_overrides "pack keeps bootstrap configuration internal"
+  run_test test_pack_contract_rules_cannot_forge_sections "pack contract rules cannot forge sections"
   run_test test_pack_token_budget_uses_token_assembler "pack token budget uses token assembler"
+  run_test test_pack_tiny_token_budget_preserves_existing_complete_pack "pack tiny token budget preserves complete Pack"
   run_test test_pack_candidate_output_defers_hard_budget_to_request_hook "pack candidate output defers hard budget"
   run_test test_pack_modes_bound_size_without_dropping_capabilities "pack modes bound size without dropping capabilities"
   run_test test_profile_init_ignores_non_python_tests_dir "profile init ignores shell-only tests dir"

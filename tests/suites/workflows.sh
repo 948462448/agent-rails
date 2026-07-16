@@ -125,10 +125,169 @@ PROFILE
 
   assert_contains "$output" "Running suggested commands"
   assert_contains "$output" "runner-ok"
-  if grep -Fq 'eval "$command"' "$ROOT_DIR/scripts/agent-check.sh"; then
-    printf 'agent-check should not run verification through eval.\n' >&2
-    exit 1
-  fi
+}
+
+test_agent_check_run_target_guard_ignores_inherited_worktree() {
+  local repo="$TMP_ROOT/check-target-guard-repo"
+  local other_worktree="$TMP_ROOT/check-target-guard-other"
+  local profile="$TMP_ROOT/check-target-guard.profile"
+  local marker="$TMP_ROOT/check-target-guard-ran"
+  local main_sha target_sha inherited_git_dir output status
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# base\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" base
+  git -C "$repo" branch -M main
+  main_sha="$(git -C "$repo" rev-parse HEAD)"
+
+  git -C "$repo" switch -qc target
+  mkdir -p "$repo/backend"
+  printf 'print("target")\n' > "$repo/backend/app.py"
+  git -C "$repo" add backend/app.py
+  git_commit "$repo" target
+  target_sha="$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" switch -q main
+  git -C "$repo" worktree add -q "$other_worktree" target
+  inherited_git_dir="$(git -C "$other_worktree" rev-parse --absolute-git-dir)"
+  [[ "$target_sha" != "$main_sha" ]]
+  [[ "$(
+    GIT_DIR="$inherited_git_dir" GIT_WORK_TREE="$other_worktree" \
+      git rev-parse HEAD
+  )" == "$target_sha" ]]
+
+  printf 'VERIFY_BACKEND=\047touch "%s"\047\n' "$marker" > "$profile"
+
+  status=0
+  output="$(
+    GIT_DIR="$inherited_git_dir" GIT_WORK_TREE="$other_worktree" \
+      "$AGENT_RAILS_BIN" check \
+        --project "$repo" \
+        --profile "$profile" \
+        --base "$main_sha" \
+        --target-ref "$target_sha" \
+        --run 2>&1
+  )" || status=$?
+
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Cannot --run checks for target ref"
+  assert_contains "$output" "checkout is at HEAD ${main_sha:0:12}"
+  assert_file_not_exists "$marker"
+}
+
+test_pack_and_check_share_python_verification_plan() {
+  local repo="$TMP_ROOT/shared-verification-plan"
+  local profile="$TMP_ROOT/shared-verification-plan.profile"
+  local profile_count="$TMP_ROOT/shared-verification-plan-profile-count"
+  local output="$TMP_ROOT/shared-verification-plan.md"
+  local check_output suggestion
+  mkdir -p "$repo/backend"
+  git -C "$repo" init -q
+  printf '# shared verification plan\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf 'print("changed")\n' > "$repo/backend/app.py"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'count=0\n'
+    printf '[[ ! -f "%s" ]] || count="$(cat "%s")"\n' "$profile_count" "$profile_count"
+    printf 'printf "%%s\\n" "$((count + 1))" > "%s"\n' "$profile_count"
+    printf 'PROJECT_NAME="shared-verification-plan"\n'
+    printf 'VERIFY_BACKEND=\047printf "shared-plan-ok\\n"\047\n'
+    printf 'VERIFY_PYTHON="$VERIFY_BACKEND"\n'
+  } > "$profile"
+
+  check_output="$("$AGENT_RAILS_BIN" check --project "$repo" --profile "$profile" --suggestions-only)"
+  suggestion='- [backend changed] printf "shared-plan-ok\n"'
+  assert_contains "$check_output" "$suggestion"
+  assert_not_contains "$check_output" "python changed"
+
+  printf '0\n' > "$profile_count"
+  "$AGENT_RAILS_BIN" pack --project "$repo" --profile "$profile" --output "$output" \
+    --pack-mode lite "share one verification plan" >/dev/null
+
+  assert_file_contains "$output" "$suggestion"
+  assert_file_not_contains "$output" "python changed"
+  [[ "$(cat "$profile_count")" == "1" ]]
+}
+
+test_check_and_publish_use_python_target_context() {
+  local repo="$TMP_ROOT/check-publish-python-target-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/check-publish-python-target-context.profile"
+  local missing_profile="$TMP_ROOT/check-publish-python-target-context-missing.profile"
+  local profile_count="$TMP_ROOT/check-publish-python-target-context-profile-count"
+  local env_file="$TMP_ROOT/check-publish-python-target-context.env"
+  local env_marker="$TMP_ROOT/check-publish-python-target-context-env-marker"
+  local shadow_marker="$TMP_ROOT/check-publish-python-target-context-shadow-marker"
+  local output status
+  mkdir -p "$nested"
+  repo="$(cd "$repo" && pwd -P)"
+  nested="$repo/nested/path"
+  git -C "$repo" init -q
+  git -C "$repo" branch -M main
+  printf '# Check and Publish Python Target Project Context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'count=0\n'
+    printf '[[ ! -f "%s" ]] || count="$(cat "%s")"\n' "$profile_count" "$profile_count"
+    printf 'printf "%%s\\n" "$((count + 1))" > "%s"\n' "$profile_count"
+    printf 'AGENT_RAILS_ENV_FILE="%s"\n' "$env_file"
+    printf 'VERIFY_PYTHON=\047printf "custom-check-ok\\n"\047\n'
+    printf 'BASE_REF="main"\n'
+  } > "$profile"
+  {
+    printf 'touch "%s"\n' "$env_marker"
+    printf 'exit 98\n'
+  } > "$env_file"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" check \
+        --project "$nested" \
+        --profile "$profile" \
+        --print-only)"
+  assert_contains "$output" "custom-check-ok"
+  [[ "$(cat "$profile_count")" -eq 1 ]]
+  assert_file_not_exists "$env_marker"
+  assert_file_not_exists "$shadow_marker"
+
+  rm -f "$profile_count"
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" publish check \
+        --project "$nested" \
+        --profile "$profile" \
+        --no-secret-scan)"
+  assert_contains "$output" "Project: $repo"
+  assert_contains "$output" "custom-check-ok"
+  [[ "$(cat "$profile_count")" -eq 1 ]]
+  assert_file_not_exists "$env_marker"
+  assert_file_not_exists "$shadow_marker"
+
+  for command in check publish; do
+    set +e
+    if [[ "$command" == "check" ]]; then
+      output="$("$AGENT_RAILS_BIN" check \
+        --project "$repo" \
+        --profile "$missing_profile" \
+        --print-only 2>&1)"
+    else
+      output="$("$AGENT_RAILS_BIN" publish check \
+        --project "$repo" \
+        --profile "$missing_profile" \
+        --no-secret-scan 2>&1)"
+    fi
+    status=$?
+    set -e
+    [[ "$status" -eq 2 ]]
+    assert_contains "$output" "Profile not found: $missing_profile"
+  done
 }
 
 test_verify_runs_plan_and_can_preview() {
@@ -151,6 +310,34 @@ test_verify_runs_plan_and_can_preview() {
   assert_contains "$preview" "Agent Rails Verify"
   assert_contains "$preview" "bash -n scripts/verify.sh"
   assert_not_contains "$preview" "Running suggested commands"
+}
+
+test_verify_preserves_child_exit_and_partial_output() {
+  local repo="$TMP_ROOT/verify-child-exit"
+  local profile="$TMP_ROOT/verify-child-exit.profile"
+  local output status
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# verify child exit\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf '\nchanged\n' >> "$repo/README.md"
+  cat > "$profile" <<'PROFILE'
+VERIFY_PROJECT='printf "partial-verification-output\n"; exit 19'
+PROFILE
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" verify \
+    --project "$repo" \
+    --profile "$profile" \
+    --publish 2>&1)"
+  status=$?
+  set -e
+
+  [[ "$status" -eq 19 ]]
+  assert_contains "$output" "partial-verification-output"
+  assert_not_contains "$output" "Publish readiness"
+  assert_not_contains "$output" "verification complete"
 }
 
 test_verify_publish_adds_release_check() {
@@ -186,9 +373,89 @@ test_verify_publish_adds_release_check() {
   assert_contains "$output" "--no-secret-scan requires --publish"
 }
 
+test_verify_uses_python_target_context() {
+  local repo="$TMP_ROOT/verify-python-target-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/verify-python-target-context.profile"
+  local invalid_profile="$TMP_ROOT/verify-python-target-context-invalid.profile"
+  local missing_profile="$TMP_ROOT/verify-python-target-context-missing.profile"
+  local profile_marker="$TMP_ROOT/verify-python-target-context-profile-marker"
+  local shadow_marker="$TMP_ROOT/verify-python-target-context-shadow-marker"
+  local output status
+  mkdir -p "$nested"
+  repo="$(cd "$repo" && pwd -P)"
+  nested="$repo/nested/path"
+  git -C "$repo" init -q
+  printf '# verify Python Target Project Context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'printf "loaded\\n" >> "$VERIFY_PROFILE_MARKER"\n'
+    printf 'VERIFY_PYTHON=\047printf "custom-verification-ok\\n"\047\n'
+  } > "$profile"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+    VERIFY_PROFILE_MARKER="$profile_marker" \
+      "$AGENT_RAILS_BIN" verify \
+        --project "$nested" \
+        --profile "$profile")"
+
+  assert_contains "$output" "Project: $repo"
+  assert_contains "$output" "custom-verification-ok"
+  assert_file_not_exists "$shadow_marker"
+  [[ "$(wc -l < "$profile_marker" | tr -d ' ')" -eq 1 ]]
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" verify \
+    --project "$repo" \
+    --profile "$missing_profile" \
+    --print-only 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Profile not found: $missing_profile"
+  assert_not_contains "$output" "Agent Rails Verify"
+
+  printf 'false\n' > "$invalid_profile"
+  set +e
+  output="$("$AGENT_RAILS_BIN" verify \
+    --project "$repo" \
+    --profile "$invalid_profile" \
+    --print-only 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Profile could not be sourced: $invalid_profile"
+  assert_not_contains "$output" "Agent Rails Verify"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" verify \
+    --project "$TMP_ROOT/verify-python-target-context-missing-project" \
+    --profile "$profile" \
+    --print-only 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 1 ]]
+  [[ -z "$output" ]]
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" verify \
+    --project '' \
+    --profile "$profile" \
+    --print-only 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 1 ]]
+  [[ -z "$output" ]]
+}
+
 test_publish_check_summarizes_scope_and_redacts_secrets() {
   local repo="$TMP_ROOT/publish-check"
-  local output
+  local unreadable_path output status
   mkdir -p "$repo/scripts"
   git -C "$repo" init -q
   git -C "$repo" branch -M main
@@ -213,6 +480,10 @@ test_publish_check_summarizes_scope_and_redacts_secrets() {
     printf 'AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base\n'
     printf 'SERVICE_TOKEN_ENV="${SERVICE_TOKEN_ENV:-SERVICE_ACCESS_KEY}"\n'
   } > "$repo/tokenizer.md"
+  printf 'SPACED_API_TOKEN=unit-test-spaced-secret-123456\n' > "$repo/secret file.env"
+  printf 'ARROW_API_TOKEN=unit-test-arrow-secret-123456\n' > "$repo/arrow -> secret.env"
+  printf 'UNICODE_API_TOKEN=unit-test-unicode-secret-123456\n' > "$repo/秘密.env"
+  printf 'DASH_API_TOKEN=unit-test-dash-secret-123456\n' > "$repo/-secret.env"
 
   output="$("$AGENT_RAILS_BIN" publish check --project "$repo")"
 
@@ -220,114 +491,78 @@ test_publish_check_summarizes_scope_and_redacts_secrets() {
   assert_contains "$output" "Agent publish check"
   assert_contains "$output" "Staged files (1)"
   assert_contains "$output" "Unstaged files (1)"
-  assert_contains "$output" "Untracked files (2)"
+  assert_contains "$output" "Untracked files (6)"
   assert_contains "$output" "scripts/run.sh"
   assert_contains "$output" ".env.local"
+  assert_contains "$output" "secret file.env"
+  assert_contains "$output" "arrow -> secret.env"
+  assert_contains "$output" "秘密.env"
+  assert_contains "$output" "-secret.env"
   assert_contains "$output" "Potential secret matches found"
   assert_contains "$output" "COMMITTED_COOKIE=<redacted>"
   assert_contains "$output" "DEPLOY_PASSWORD=<redacted>"
   assert_contains "$output" "API_TOKEN=<redacted>"
   assert_contains "$output" "SERVICE_ACCESS_KEY=<redacted>"
+  assert_contains "$output" "SPACED_API_TOKEN=<redacted>"
+  assert_contains "$output" "ARROW_API_TOKEN=<redacted>"
+  assert_contains "$output" "UNICODE_API_TOKEN=<redacted>"
+  assert_contains "$output" "DASH_API_TOKEN=<redacted>"
   assert_not_contains "$output" "LEGACY_TOKEN=<redacted>"
   assert_not_contains "$output" "unit-test-historical-secret"
   assert_not_contains "$output" "unit-test-committed-secret"
   assert_not_contains "$output" "unit-test-staged-secret"
   assert_not_contains "$output" "unit-test-unstaged-secret"
   assert_not_contains "$output" "super-secret-value"
+  assert_not_contains "$output" "unit-test-spaced-secret"
+  assert_not_contains "$output" "unit-test-arrow-secret"
+  assert_not_contains "$output" "unit-test-unicode-secret"
+  assert_not_contains "$output" "unit-test-dash-secret"
   assert_not_contains "$output" "TIKTOKEN_ENCODING=<redacted>"
   assert_not_contains "$output" "SERVICE_TOKEN_ENV=<redacted>"
   assert_contains "$output" "Suggested verification:"
+
+  unreadable_path="$repo/unreadable.env"
+  printf 'UNREADABLE_API_TOKEN=unit-test-unreadable-secret-123456\n' > "$unreadable_path"
+  chmod 000 "$unreadable_path"
+  set +e
+  output="$("$AGENT_RAILS_BIN" publish check --project "$repo" 2>&1)"
+  status=$?
+  set -e
+  chmod 600 "$unreadable_path"
+  [[ "$status" -eq 1 ]]
+  assert_contains "$output" "Unable to inspect untracked file for sensitive output: unreadable.env"
+  assert_not_contains "$output" "unit-test-unreadable-secret"
 }
 
-test_sensitive_output_module_redacts_supported_formats() {
-  local input="$TMP_ROOT/sensitive-output-input.txt"
-  local redacted="$TMP_ROOT/sensitive-output-redacted.txt"
-  local findings="$TMP_ROOT/sensitive-output-findings.txt"
-  local diff_input="$TMP_ROOT/sensitive-output-diff.txt"
-  local diff_redacted="$TMP_ROOT/sensitive-output-diff-redacted.txt"
-  local scan_diff_input="$TMP_ROOT/sensitive-output-scan-diff.txt"
-  local scan_diff_findings="$TMP_ROOT/sensitive-output-scan-diff-findings.txt"
+test_publish_check_scan_io_failure_exits_one() {
+  local fake_bin="$TMP_ROOT/publish-io-bin"
+  local real_git repo="$TMP_ROOT/publish-io-failure"
+  local output status
+  mkdir -p "$repo" "$fake_bin"
+  git -C "$repo" init -q
+  printf '# publish I/O failure\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  git -C "$repo" branch -M main
+  real_git="$(command -v git)"
+  cat > "$fake_bin/git" <<EOF
+#!/usr/bin/env bash
+for argument in "\$@"; do
+  if [[ "\$argument" == "diff" ]]; then
+    exit 74
+  fi
+done
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$fake_bin/git"
 
-  cat > "$input" <<'SENSITIVE'
-SERVICE_ACCESS_KEY=unit-test-secret-shell-123456
-authorization: Bearer unit-test-secret-header-123456
-"api_key": "unit-test-secret-json-123456",
-SERVICE_TOKEN_ENV="${SERVICE_TOKEN_ENV:-SERVICE_ACCESS_KEY}"
-AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base
-AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="$(normalize_positive_int "$AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE" 2)"
-token = substr(content, 1, 1)
-token=raw_tokens[i]
-secret_findings_file="$tmp_dir/secret-findings"
-api_token=build_token(config)
-password=options.password
-cookie="${!COOKIE_ENV-}"
------BEGIN PRIVATE KEY-----
-unit-test-private-key-material-123456
------END PRIVATE KEY-----
-SENSITIVE
+  set +e
+  output="$(PATH="$fake_bin:$PATH" "$AGENT_RAILS_BIN" publish check --project "$repo" 2>&1)"
+  status=$?
+  set -e
 
-  # shellcheck source=scripts/agent-sensitive-output.sh
-  source "$ROOT_DIR/scripts/agent-sensitive-output.sh"
-  agent_sensitive_redact_file "$input" "$redacted"
-  agent_sensitive_scan_file "$input" > "$findings"
-
-  assert_file_contains "$redacted" 'SERVICE_ACCESS_KEY=<redacted>'
-  assert_file_contains "$redacted" 'authorization: <redacted>'
-  assert_file_contains "$redacted" '"api_key": "<redacted>",'
-  assert_file_contains "$redacted" 'SERVICE_TOKEN_ENV="${SERVICE_TOKEN_ENV:-SERVICE_ACCESS_KEY}"'
-  assert_file_contains "$redacted" 'AGENT_RAILS_TIKTOKEN_ENCODING=cl100k_base'
-  assert_file_contains "$redacted" 'AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="<redacted>"'
-  assert_file_contains "$redacted" 'token = <redacted>'
-  assert_file_contains "$redacted" 'token=<redacted>'
-  assert_file_contains "$redacted" 'secret_findings_file="<redacted>"'
-  assert_file_contains "$redacted" 'api_token=<redacted>'
-  assert_file_contains "$redacted" 'password=<redacted>'
-  assert_file_contains "$redacted" 'cookie="<redacted>"'
-  assert_file_contains "$redacted" '<redacted private key block>'
-  assert_file_not_contains "$redacted" 'unit-test-secret'
-  assert_file_not_contains "$redacted" 'unit-test-private-key-material'
-
-  assert_file_contains "$findings" 'SERVICE_ACCESS_KEY=<redacted>'
-  assert_file_contains "$findings" 'authorization: <redacted>'
-  assert_file_contains "$findings" '"api_key": "<redacted>",'
-  assert_file_not_contains "$findings" 'TOKEN_ENV'
-  assert_file_not_contains "$findings" 'TIKTOKEN_ENCODING'
-  assert_file_not_contains "$findings" 'CHARS_PER_TOKEN_ESTIMATE'
-  assert_file_not_contains "$findings" 'token ='
-  assert_file_not_contains "$findings" 'token='
-  assert_file_not_contains "$findings" 'secret_findings_file='
-  assert_file_not_contains "$findings" 'api_token='
-  assert_file_not_contains "$findings" 'password='
-  assert_file_not_contains "$findings" 'cookie='
-  assert_file_not_contains "$findings" 'unit-test-secret'
-
-  cat > "$diff_input" <<'SENSITIVE_DIFF'
- -----BEGIN PRIVATE KEY-----
--old-unit-test-private-key-material
-+new-unit-test-private-key-material
- -----END PRIVATE KEY-----
-SENSITIVE_DIFF
-  agent_sensitive_redact_file "$diff_input" "$diff_redacted" diff
-  assert_file_contains "$diff_redacted" '<redacted private key block>'
-  assert_file_not_contains "$diff_redacted" 'private-key-material'
-
-  cat > "$scan_diff_input" <<'SENSITIVE_SCAN_DIFF'
-diff --git a/config/runtime.env b/config/runtime.env
---- config/runtime.env
-+++ config/runtime.env
-@@ -10,1 +10,4 @@
--LEGACY_TOKEN=unit-test-removed-secret-123456
-+API_TOKEN=unit-test-added-secret-123456
-+-----BEGIN PRIVATE KEY-----
-+unit-test-added-private-key-material-123456
-+-----END PRIVATE KEY-----
-SENSITIVE_SCAN_DIFF
-  agent_sensitive_scan_file "$scan_diff_input" diff > "$scan_diff_findings"
-  assert_file_contains "$scan_diff_findings" 'config/runtime.env:10: API_TOKEN=<redacted>'
-  assert_file_contains "$scan_diff_findings" 'config/runtime.env:11: <redacted private key block>'
-  assert_file_not_contains "$scan_diff_findings" 'LEGACY_TOKEN'
-  assert_file_not_contains "$scan_diff_findings" 'unit-test-added-secret'
-  assert_file_not_contains "$scan_diff_findings" 'unit-test-added-private-key-material'
+  [[ "$status" -eq 1 ]]
+  assert_contains "$output" "Unable to inspect committed publish diff for sensitive output."
 }
 
 test_publish_check_requires_deployed_baseline_when_upstream_equals_target() {
@@ -387,90 +622,6 @@ test_git_commands_reject_invalid_base_ref() {
     exit 1
   fi
   assert_contains "$output" "Base ref not found: refs/heads/does-not-exist"
-}
-
-test_git_scope_module_contract() {
-  local repo="$TMP_ROOT/git-scope-module"
-  local snapshot_dir="$TMP_ROOT/git-scope-snapshot"
-  local target_snapshot_dir="$TMP_ROOT/git-scope-target-snapshot"
-  local output
-  mkdir -p "$repo" "$snapshot_dir" "$target_snapshot_dir"
-  git -C "$repo" init -q
-  git -C "$repo" branch -M main
-  printf '# base\n' > "$repo/README.md"
-  git -C "$repo" add README.md
-  git_commit "$repo" base
-  git -C "$repo" switch -q -c feature
-  printf '#!/usr/bin/env bash\n' > "$repo/feature.sh"
-  git -C "$repo" add feature.sh
-  git_commit "$repo" feature
-  printf '\nchanged\n' >> "$repo/README.md"
-  printf 'untracked\n' > "$repo/notes.txt"
-
-  # shellcheck source=scripts/agent-git-scope.sh
-  source "$ROOT_DIR/scripts/agent-git-scope.sh" || return 1
-  (
-    cd "$repo"
-    agent_git_scope_resolve HEAD "" project
-    [[ "$AGENT_GIT_SCOPE_BASE_REF" == "main" ]]
-    [[ "$AGENT_GIT_SCOPE_TARGET_SHA" == "$(git rev-parse HEAD)" ]]
-    [[ "$AGENT_GIT_SCOPE_MERGE_BASE" == "$(git merge-base HEAD main)" ]]
-    agent_git_scope_write_snapshot "$snapshot_dir" 1
-    agent_git_scope_write_snapshot "$target_snapshot_dir" 0
-  )
-
-  assert_file_contains "$snapshot_dir/committed-paths" "feature.sh"
-  assert_file_contains "$snapshot_dir/worktree-paths" "README.md"
-  assert_file_contains "$snapshot_dir/worktree-paths" "notes.txt"
-  assert_file_contains "$snapshot_dir/changed-paths" "feature.sh"
-  assert_file_contains "$snapshot_dir/changed-paths" "notes.txt"
-  assert_file_contains "$target_snapshot_dir/changed-paths" "feature.sh"
-  assert_file_not_contains "$target_snapshot_dir/changed-paths" "README.md"
-  assert_file_not_contains "$target_snapshot_dir/changed-paths" "notes.txt"
-  [[ ! -s "$target_snapshot_dir/status" ]] || {
-    printf 'Expected target-only Git scope snapshot to omit working tree status.\n' >&2
-    exit 1
-  }
-
-  if output="$(cd "$repo" && agent_git_scope_resolve HEAD refs/heads/does-not-exist project 2>&1)"; then
-    printf 'Expected Git Scope Module to reject an invalid base ref.\n' >&2
-    exit 1
-  fi
-  assert_contains "$output" "Base ref not found: refs/heads/does-not-exist"
-}
-
-test_model_preset_module_contract() {
-  (
-    # shellcheck source=scripts/agent-model-presets.sh
-    source "$ROOT_DIR/scripts/agent-model-presets.sh"
-
-    agent_model_preset_load "QWEN 3.7 MAX"
-    [[ "$AGENT_RAILS_MODEL_PRESET_FOUND" -eq 1 ]]
-    [[ "$AGENT_RAILS_MODEL_CANONICAL" == "qwen3.7-max" ]]
-    [[ "$AGENT_RAILS_MODEL_CONTEXT_TOKENS" -eq 1000000 ]]
-    [[ "$AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS" -eq 983000 ]]
-    [[ "$(agent_model_preset_budget_for_mode deep)" -eq 160000 ]]
-    agent_model_preset_known "qwen-3.7-max"
-
-    agent_model_preset_load "deepseekv4pro"
-    [[ "$AGENT_RAILS_MODEL_CANONICAL" == "deepseek-v4-pro" ]]
-    [[ "$AGENT_RAILS_MODEL_RPM" -eq 15000 ]]
-    [[ "$AGENT_RAILS_MODEL_TPM" -eq 1200000 ]]
-
-    agent_model_preset_load "generic"
-    [[ "$AGENT_RAILS_MODEL_PRESET_FOUND" -eq 0 ]]
-    [[ "$AGENT_RAILS_MODEL_CANONICAL" == "generic" ]]
-    [[ -z "$AGENT_RAILS_MODEL_CONTEXT_TOKENS" ]]
-    agent_model_preset_known "generic"
-
-    agent_model_preset_load "unknown-model"
-    [[ "$AGENT_RAILS_MODEL_PRESET_FOUND" -eq 0 ]]
-    [[ "$AGENT_RAILS_MODEL_CANONICAL" == "unknown-model" ]]
-    [[ -z "$AGENT_RAILS_MODEL_CONTEXT_TOKENS" ]]
-    [[ -z "$AGENT_RAILS_MODEL_RPM" ]]
-    [[ -z "$(agent_model_preset_budget_for_mode deep)" ]]
-    ! agent_model_preset_known "unknown-model"
-  )
 }
 
 test_estimate_uses_model_preset() {
@@ -577,6 +728,48 @@ test_python_online_memory_modules() {
   PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH="$ROOT_DIR/src" \
     python3 "$ROOT_DIR/tests/test_online_memory.py"
+}
+
+test_python_git_scope_modules() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_git_scope.py"
+}
+
+test_python_sensitive_output_modules() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_sensitive_output.py"
+}
+
+test_python_verification_plan_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_verification_plan.py"
+}
+
+test_python_check_application_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_check_application.py"
+}
+
+test_python_publish_check_application_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_publish_check_application.py"
+}
+
+test_python_verify_application_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_verify_application.py"
+}
+
+test_python_run_application_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_run_application.py"
 }
 
 install_target_python_shadow_package() {
@@ -858,33 +1051,6 @@ test_pack_defaults_to_worktree_specific_path() {
   fi
 }
 
-test_init_paths_do_not_leak_default_config_home_to_children() {
-  local repo="$TMP_ROOT/init-paths-child-home"
-  local profile="$TMP_ROOT/init-paths-child-home.profile"
-  local parent_home="$TMP_ROOT/home-init-paths-parent"
-  local child_home="$TMP_ROOT/home-init-paths-child"
-  local output path
-  mkdir -p "$repo" "$parent_home" "$child_home"
-  git -C "$repo" init -q
-  printf '# temp\n' > "$repo/README.md"
-  git -C "$repo" add README.md
-  git_commit "$repo" init
-  {
-    printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n'
-    printf 'PROJECT_NAME="init-paths-child"\n'
-  } > "$profile"
-
-  output="$(HOME="$parent_home" bash -c '
-    source "$1/scripts/agent-paths.sh"
-    agent_rails_init_paths
-    HOME="$2" "$3" pack --project "$4" --profile "$5" --budget 1000 "child home check"
-  ' bash "$ROOT_DIR" "$child_home" "$AGENT_RAILS_BIN" "$repo" "$profile")"
-  path="$(printf '%s\n' "$output" | sed -n -E 's/^Wrote //p' | sed -n '1p')"
-
-  assert_contains "$path" "$child_home/.agent-rails/agent-context/"
-  assert_not_contains "$path" "$parent_home/.agent-rails/agent-context/"
-}
-
 test_standalone_tui_ab_eval() {
   if ! command -v python3 >/dev/null 2>&1; then
     printf 'python3 is required for tools/ab_eval.py.\n' >&2
@@ -909,14 +1075,17 @@ run_workflow_tests() {
   run_test test_agent_check_suggestions_only_omits_repeated_scope "agent-check suggestions-only omits repeated scope"
   run_test test_agent_check_selects_changed_test_suites "agent-check selects changed test suites"
   run_test test_agent_check_run_uses_child_shell "agent-check --run uses child shell"
+  run_test test_agent_check_run_target_guard_ignores_inherited_worktree "agent-check target guard ignores inherited worktree"
+  run_test test_pack_and_check_share_python_verification_plan "pack and check share Python Verification Plan"
+  run_test test_check_and_publish_use_python_target_context "check and publish use Python Target Project Context"
   run_test test_verify_runs_plan_and_can_preview "verify runs or previews the verification plan"
+  run_test test_verify_preserves_child_exit_and_partial_output "verify preserves child exit and partial output"
   run_test test_verify_publish_adds_release_check "verify --publish adds release checks"
+  run_test test_verify_uses_python_target_context "verify uses Python Target Project Context"
   run_test test_publish_check_summarizes_scope_and_redacts_secrets "publish check summarizes scope and redacts secrets"
-  run_test test_sensitive_output_module_redacts_supported_formats "sensitive output module redacts supported formats"
   run_test test_publish_check_requires_deployed_baseline_when_upstream_equals_target "publish check requires deployed baseline when upstream equals target"
+  run_test test_publish_check_scan_io_failure_exits_one "publish check maps scan I/O failure to runtime exit"
   run_test test_git_commands_reject_invalid_base_ref "git commands reject invalid base ref"
-  run_test test_git_scope_module_contract "shared Git Scope module contract"
-  run_test test_model_preset_module_contract "shared Model Preset module contract"
   run_test test_estimate_uses_model_preset "estimate uses model preset"
   run_test test_estimate_uses_custom_tokenizer_command "estimate uses custom tokenizer command"
   run_test test_estimate_uses_deepseek_preset "estimate uses deepseek preset"
@@ -925,6 +1094,13 @@ run_workflow_tests() {
   run_test test_python_target_project_modules "Python Paths, Profile, and Target Project modules"
   run_test test_python_profile_init_modules "Python Profile Init module"
   run_test test_python_online_memory_modules "Python provider-neutral Online Memory Interface"
+  run_test test_python_git_scope_modules "Python Git Scope module"
+  run_test test_python_sensitive_output_modules "Python Sensitive Output Guard"
+  run_test test_python_verification_plan_module "Python Verification Plan module"
+  run_test test_python_check_application_module "Python Agent Check Application Service"
+  run_test test_python_publish_check_application_module "Python Publish Check Application Service"
+  run_test test_python_verify_application_module "Python Verify Application Service"
+  run_test test_python_run_application_module "Python Run Application Service"
   run_test test_python_cli_bootstrap_ignores_target_shadow_package_for_run "Python CLI bootstrap ignores Target Project shadow package for run"
   run_test test_python_cli_bootstrap_preserves_relative_estimate_file "Python CLI bootstrap preserves relative estimate file"
   run_test test_python_cli_bootstrap_ignores_target_shadow_package_for_profile_init "Python CLI bootstrap ignores Target Project shadow package for Profile Init"
@@ -934,7 +1110,6 @@ run_workflow_tests() {
   run_test test_run_infers_deep_for_refactor_goal "run infers deep for refactor goal"
   run_test test_run_infers_lite_for_poc_goal "run infers lite for poc goal"
   run_test test_pack_defaults_to_worktree_specific_path "pack defaults to worktree-specific path"
-  run_test test_init_paths_do_not_leak_default_config_home_to_children "init paths do not leak default config home to children"
   run_test test_standalone_tui_ab_eval "standalone TUI A/B eval"
   run_test test_agent_rails_cli_has_no_eval_command "agent-rails CLI has no eval command"
 }

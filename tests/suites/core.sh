@@ -26,6 +26,16 @@ test_init_without_project_stays_project_neutral() {
   assert_contains "$output" 'agent-rails verify'
 }
 
+test_python_init_application_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_init_application.py"
+}
+
+test_python_skills_install_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_skills_install.py"
+}
+
 test_version_command_reads_version_file() {
   local output
 
@@ -34,6 +44,62 @@ test_version_command_reads_version_file() {
 
   output="$("$AGENT_RAILS_BIN" version)"
   assert_contains "$output" "agent-rails $EXPECTED_AGENT_RAILS_VERSION"
+}
+
+test_python_public_cli_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_public_cli.py"
+}
+
+test_top_level_shell_is_thin_python_bootstrap() {
+  local forbidden line_count
+  line_count="$(wc -l < "$ROOT_DIR/bin/agent-rails")"
+  if [[ "$line_count" -gt 20 ]]; then
+    printf 'Expected top-level Shell bootstrap to stay at or below 20 lines, got %s.\n' \
+      "$line_count" >&2
+    return 1
+  fi
+  assert_file_contains "$ROOT_DIR/bin/agent-rails" "python3 -E"
+  assert_file_contains "$ROOT_DIR/bin/agent-rails" "agent-python-cli.py\" public"
+  assert_file_contains "$ROOT_DIR/bin/agent-rails" "export AGENT_RAILS_HOME="
+  for forbidden in \
+    "case " "run_in_project" "usage()" "source " "eval " "agent-setup.sh" \
+    "agent-run.sh" "agent-verify.sh" "agent-update.sh"; do
+    assert_file_not_contains "$ROOT_DIR/bin/agent-rails" "$forbidden"
+  done
+}
+
+test_top_level_python_bootstrap_ignores_shadow_and_stale_home() {
+  local repo="$TMP_ROOT/public-cli-shadow-project"
+  local shadow_marker="$TMP_ROOT/public-cli-shadow-marker"
+  local output root_physical output_physical
+  mkdir -p "$repo"
+  install_target_python_shadow_package "$repo"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_HOME="$TMP_ROOT/stale-agent-rails-home" \
+    AGENT_RAILS_VERSION="stale-version" \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" home)"
+
+  root_physical="$(cd "$ROOT_DIR" && pwd -P)"
+  output_physical="$(cd "$output" && pwd -P)"
+  [[ "$output_physical" == "$root_physical" ]] || {
+    printf 'Expected top-level CLI to resolve the current kit home.\n' >&2
+    return 1
+  }
+  assert_file_not_exists "$shadow_marker"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_HOME="$TMP_ROOT/stale-agent-rails-home" \
+    AGENT_RAILS_VERSION="stale-version" \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" --version)"
+  assert_contains "$output" "agent-rails $EXPECTED_AGENT_RAILS_VERSION"
+  assert_not_contains "$output" "stale-version"
+  assert_file_not_exists "$shadow_marker"
 }
 
 test_plugin_manifests_match_version_file() {
@@ -53,6 +119,11 @@ prepare_update_repo() {
   printf '# temp\n' > "$repo/README.md"
   git -C "$repo" add README.md
   git_commit "$repo" init
+}
+
+test_python_update_application_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_update_application.py"
 }
 
 test_update_requires_explicit_tool() {
@@ -157,6 +228,57 @@ test_update_falls_back_from_missing_legacy_kit_profile() {
   assert_contains "$output" "Refresh target adapter and skills"
 }
 
+test_update_uses_python_target_context_without_loading_profile() {
+  local repo="$TMP_ROOT/update-python-target-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/update-python-target-context.profile"
+  local missing_profile="$TMP_ROOT/update-python-target-context-missing.profile"
+  local profile_marker="$TMP_ROOT/update-python-target-context-profile-marker"
+  local shadow_marker="$TMP_ROOT/update-python-target-context-shadow-marker"
+  local output status
+  mkdir -p "$nested"
+  repo="$(cd "$repo" && pwd -P)"
+  nested="$repo/nested/path"
+  git -C "$repo" init -q
+  printf '# update Python Target Project Context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  {
+    printf 'touch "%s"\n' "$profile_marker"
+    printf 'exit 97\n'
+  } > "$profile"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" update \
+        --project "$nested" \
+        --profile "$profile" \
+        --tool claude \
+        --skip-pull \
+        --skip-tests \
+        --dry-run)"
+
+  assert_contains "$output" "Project: $repo"
+  assert_contains "$output" "Profile: $profile"
+  assert_file_not_exists "$profile_marker"
+  assert_file_not_exists "$shadow_marker"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" update \
+    --project "$repo" \
+    --profile "$missing_profile" \
+    --tool claude \
+    --skip-pull \
+    --skip-tests \
+    --dry-run 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Profile not found: $missing_profile"
+}
+
 test_upgrade_self_rejects_tool() {
   local output
 
@@ -193,7 +315,12 @@ test_release_update_skips_source_only_test_suite() {
   local marker="$TMP_ROOT/release-update-tests-ran"
   local output
   mkdir -p "$release_home/tests" "$repo"
-  cp -R "$ROOT_DIR/bin" "$ROOT_DIR/profiles" "$ROOT_DIR/scripts" "$release_home/"
+  cp -R \
+    "$ROOT_DIR/bin" \
+    "$ROOT_DIR/profiles" \
+    "$ROOT_DIR/scripts" \
+    "$ROOT_DIR/src" \
+    "$release_home/"
   cp "$ROOT_DIR/VERSION" "$release_home/VERSION"
   git -C "$repo" init -q
   printf '# temp\n' > "$repo/README.md"
@@ -232,7 +359,9 @@ prepare_release_fixture() {
   RELEASE_FIXTURE_SERVER="$TMP_ROOT/release-server"
 
   if [[ ! -f "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz" ]]; then
-    bash "$ROOT_DIR/scripts/build-release.sh" --output "$RELEASE_FIXTURE_DIST" --include-worktree >/dev/null
+    AGENT_RAILS_HOME="$ROOT_DIR" PYTHONDONTWRITEBYTECODE=1 \
+      python3 -I "$ROOT_DIR/scripts/agent-python-cli.py" \
+        release-build --output "$RELEASE_FIXTURE_DIST" --include-worktree >/dev/null
   fi
 
   mkdir -p "$RELEASE_FIXTURE_SERVER/releases/download/v$EXPECTED_AGENT_RAILS_VERSION"
@@ -249,8 +378,42 @@ test_release_build_creates_installable_assets() {
   assert_file_exists "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz"
   assert_file_exists "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz.sha256"
   assert_file_exists "$RELEASE_FIXTURE_DIST/install.sh"
+  assert_file_exists "$RELEASE_FIXTURE_DIST/release_install.py"
   listing="$(tar -tzf "$RELEASE_FIXTURE_DIST/agent-rails.tar.gz")"
   assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/bin/agent-rails"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/git/scope.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/security/sensitive_output.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/assembler.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/pack_policy.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/change_evidence.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/project_docs.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/memory_evidence.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/contract_sections.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/pack_renderer.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/pack_application.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/core/private_text.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/memory/suggestion.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/adapters/content.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/adapters/workspace.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/adapters/opencode.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/verification/check_application.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/context/markdown.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/verification/plan.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/git/_runner.py"
+  assert_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/src/agent_rails/config/target_project.py"
+  assert_not_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/scripts/agent-git-scope.sh"
+  assert_not_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/scripts/agent-sensitive-output.sh"
+  assert_not_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/scripts/agent-target-project.sh"
+  assert_not_contains "$listing" "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/scripts/agent-model-presets.sh"
+  for obsolete in \
+    agent-check.sh agent-codex.sh agent-context-pack.sh agent-doctor.sh \
+    agent-estimate.sh agent-init-profile.sh agent-init-shell.sh \
+    agent-install-claude.sh agent-install-skills.sh agent-memory-suggest.sh \
+    agent-opencode.sh agent-publish-check.sh agent-run.sh agent-setup.sh \
+    agent-uninstall-claude.sh agent-update.sh agent-verify.sh build-release.sh; do
+    assert_not_contains "$listing" \
+      "agent-rails-$EXPECTED_AGENT_RAILS_VERSION/scripts/$obsolete"
+  done
 
   if command -v sha256sum >/dev/null 2>&1; then
     (cd "$RELEASE_FIXTURE_DIST" && sha256sum -c agent-rails.tar.gz.sha256 >/dev/null)
@@ -259,38 +422,14 @@ test_release_build_creates_installable_assets() {
   fi
 }
 
-test_release_build_handles_tar_sigpipe_behavior() {
-  local fake_bin="$TMP_ROOT/release-tar-sigpipe-bin"
-  local output_dir="$TMP_ROOT/release-tar-sigpipe-dist"
-  local real_tar
-  real_tar="$(command -v tar)"
-  mkdir -p "$fake_bin"
+test_python_release_install_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_release_install.py"
+}
 
-  cat > "$fake_bin/tar" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ "${1:-}" == "-tzf" ]]; then
-  printf 'agent-rails-%s/bin/agent-rails\n' "$AGENT_RAILS_TEST_VERSION"
-  for (( index = 0; index < 10000; index++ )); do
-    printf 'agent-rails-%s/test-entry-%s\n' "$AGENT_RAILS_TEST_VERSION" "$index"
-  done
-  exit 0
-fi
-
-exec "$AGENT_RAILS_TEST_REAL_TAR" "$@"
-SH
-  chmod +x "$fake_bin/tar"
-
-  if ! AGENT_RAILS_TEST_REAL_TAR="$real_tar" \
-    AGENT_RAILS_TEST_VERSION="$EXPECTED_AGENT_RAILS_VERSION" \
-    PATH="$fake_bin:$PATH" \
-    bash "$ROOT_DIR/scripts/build-release.sh" --output "$output_dir" --include-worktree >/dev/null; then
-    printf 'Expected release build verification to tolerate tar SIGPIPE behavior.\n' >&2
-    return 1
-  fi
-
-  assert_file_exists "$output_dir/agent-rails.tar.gz"
+test_python_release_build_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_release_build.py"
 }
 
 test_release_installer_supports_non_git_self_upgrade() {
@@ -337,10 +476,11 @@ test_release_self_upgrade_switches_to_new_version() {
   local bin_dir="$TMP_ROOT/release-upgrade-bin"
   local next_version="$EXPECTED_AGENT_RAILS_VERSION-next"
   local next_workspace="$TMP_ROOT/release-next-workspace"
-  local next_release_dir="$RELEASE_FIXTURE_SERVER/releases/download/v$next_version"
+  local next_release_dir
   local checksum output
 
   prepare_release_fixture
+  next_release_dir="$RELEASE_FIXTURE_SERVER/releases/download/v$next_version"
   AGENT_RAILS_RELEASE_BASE_URL="file://$RELEASE_FIXTURE_SERVER" \
     bash "$ROOT_DIR/scripts/agent-release-install.sh" \
       --version "$EXPECTED_AGENT_RAILS_VERSION" \
@@ -352,7 +492,7 @@ test_release_self_upgrade_switches_to_new_version() {
   mv "$next_workspace/agent-rails-$EXPECTED_AGENT_RAILS_VERSION" \
     "$next_workspace/agent-rails-$next_version"
   printf '%s\n' "$next_version" > "$next_workspace/agent-rails-$next_version/VERSION"
-  tar -czf "$next_release_dir/agent-rails.tar.gz" \
+  COPYFILE_DISABLE=1 tar -czf "$next_release_dir/agent-rails.tar.gz" \
     -C "$next_workspace" "agent-rails-$next_version"
   if command -v sha256sum >/dev/null 2>&1; then
     checksum="$(sha256sum "$next_release_dir/agent-rails.tar.gz" | awk '{print $1}')"
@@ -428,6 +568,111 @@ test_codex_install_and_uninstall_dry_run() {
   assert_contains "$output" "codex plugin remove agent-rails@agent-rails-local"
 }
 
+test_python_codex_adapter_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_codex_adapter.py"
+}
+
+test_codex_rejects_action_specific_options() {
+  local args output status
+  local -a argv
+  for args in \
+    "doctor --profile /tmp/profile" \
+    "doctor --mode local" \
+    "doctor --fix-project" \
+    "doctor --dry-run" \
+    "uninstall --project /tmp/project" \
+    "uninstall --profile /tmp/profile" \
+    "uninstall --mode project" \
+    "uninstall --fix-project"; do
+    read -r -a argv <<< "$args"
+    set +e
+    output="$("$AGENT_RAILS_BIN" codex "${argv[@]}" 2>&1)"
+    status=$?
+    set -e
+    if [[ "$status" -ne 2 ]]; then
+      printf 'Expected `agent-rails codex %s` to exit 2, got %s.\n' \
+        "$args" "$status" >&2
+      return 1
+    fi
+    assert_contains "$output" "only supported by agent-rails codex"
+  done
+}
+
+test_codex_preserves_external_command_exit_status() {
+  local fake_bin="$TMP_ROOT/codex-external-exit-bin"
+  local status
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/codex" <<'SH'
+#!/usr/bin/env bash
+printf 'fake Codex failure\n' >&2
+exit 41
+SH
+  chmod +x "$fake_bin/codex"
+
+  set +e
+  PATH="$fake_bin:/usr/bin:/bin" \
+    "$AGENT_RAILS_BIN" codex install >/dev/null 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 41 ]]; then
+    printf 'Expected Codex child exit 41 to be preserved, got %s.\n' \
+      "$status" >&2
+    return 1
+  fi
+}
+
+test_codex_uses_python_target_context_without_loading_profile() {
+  local repo="$TMP_ROOT/codex-python-target-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/codex-python-target-context.profile"
+  local missing_profile="$TMP_ROOT/codex-python-target-context-missing.profile"
+  local profile_marker="$TMP_ROOT/codex-python-target-context-profile-marker"
+  local shadow_marker="$TMP_ROOT/codex-python-target-context-shadow-marker"
+  local missing_project="$TMP_ROOT/codex-python-target-context-missing-project"
+  local output status
+  mkdir -p "$nested"
+  repo="$(cd "$repo" && pwd -P)"
+  nested="$repo/nested/path"
+  git -C "$repo" init -q
+  printf '# Codex Python Target Project Context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  {
+    printf 'touch "%s"\n' "$profile_marker"
+    printf 'exit 97\n'
+  } > "$profile"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" codex install \
+        --project "$nested" \
+        --profile "$profile" \
+        --dry-run)"
+
+  assert_contains "$output" "Project: $repo"
+  assert_file_not_exists "$profile_marker"
+  assert_file_not_exists "$shadow_marker"
+
+  output="$("$AGENT_RAILS_BIN" codex install \
+    --project "$repo" \
+    --profile "$missing_profile" \
+    --fix-project \
+    --dry-run)"
+  assert_contains "$output" "--profile $missing_profile"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" codex install \
+    --project "$missing_project" \
+    --dry-run 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Project directory not found: $missing_project"
+}
+
 test_setup_claude_dry_run_uses_local_adapter_and_doctor() {
   local repo="$TMP_ROOT/setup-claude"
   local output
@@ -446,6 +691,43 @@ test_setup_claude_dry_run_uses_local_adapter_and_doctor() {
   assert_contains "$output" "Would run: $AGENT_RAILS_BIN doctor --project"
   assert_contains "$output" "Agent Rails setup complete."
   assert_file_not_exists "$repo/.claude/AGENT_RAILS.md"
+}
+
+test_python_setup_application_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_setup_application.py"
+}
+
+test_setup_preserves_child_error_events_and_exit_status() {
+  local repo="$TMP_ROOT/setup-child-error"
+  local fake_bin="$TMP_ROOT/setup-child-error-bin"
+  local output rc
+  prepare_update_repo "$repo"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/codex" <<'SH'
+#!/usr/bin/env bash
+printf 'fake Setup child output\n'
+printf 'fake Setup child failure\n' >&2
+exit 41
+SH
+  chmod +x "$fake_bin/codex"
+
+  set +e
+  output="$(PATH="$fake_bin:/usr/bin:/bin" \
+    "$AGENT_RAILS_BIN" setup \
+      --project "$repo" \
+      --tool codex 2>&1)"
+  rc=$?
+  set -e
+
+  if [[ "$rc" -ne 41 ]]; then
+    printf 'Expected Setup child exit 41 to be preserved, got %s.\n' "$rc" >&2
+    return 1
+  fi
+  assert_contains "$output" "Agent Rails Setup"
+  assert_contains "$output" "Tool: codex"
+  assert_contains "$output" "fake Setup child output"
+  assert_contains "$output" "fake Setup child failure"
 }
 
 test_setup_auto_detects_single_tool() {
@@ -503,29 +785,131 @@ test_setup_project_mode_reaches_opencode() {
   assert_not_contains "$output" "Would ensure local ignore entries"
 }
 
+test_setup_uses_python_target_context() {
+  local repo="$TMP_ROOT/setup-python-target-context"
+  local other_repo="$TMP_ROOT/setup-python-target-context-other"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/setup-python-target-context.profile"
+  local invalid_profile="$TMP_ROOT/setup-python-target-context-invalid.profile"
+  local missing_profile="$TMP_ROOT/setup-python-target-context-missing.profile"
+  local profile_marker="$TMP_ROOT/setup-python-target-context-profile-marker"
+  local env_file="$TMP_ROOT/setup-python-target-context.env"
+  local env_marker="$TMP_ROOT/setup-python-target-context-env-marker"
+  local shadow_marker="$TMP_ROOT/setup-python-target-context-shadow-marker"
+  local output status
+  mkdir -p "$nested" "$other_repo"
+  repo="$(cd "$repo" && pwd -P)"
+  nested="$repo/nested/path"
+  git -C "$repo" init -q
+  git -C "$other_repo" init -q
+  printf '# Setup Python Target Project Context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'printf "loaded\\n" >> "$SETUP_PROFILE_MARKER"\n'
+    printf 'AGENT_RAILS_ENV_FILE="%s"\n' "$env_file"
+  } > "$profile"
+  {
+    printf 'touch "%s"\n' "$env_marker"
+    printf 'exit 98\n'
+  } > "$env_file"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+    SETUP_PROFILE_MARKER="$profile_marker" \
+    GIT_DIR="$other_repo/.git" \
+    GIT_WORK_TREE="$other_repo" \
+    GIT_COMMON_DIR="$other_repo/.git" \
+      "$AGENT_RAILS_BIN" setup \
+        --project "$nested" \
+        --profile "$profile" \
+        --tool claude \
+        --dry-run)"
+
+  assert_contains "$output" "Project: $repo"
+  assert_contains "$output" "Profile: $profile"
+  assert_file_not_exists "$shadow_marker"
+  assert_file_not_exists "$env_marker"
+  [[ "$(wc -l < "$profile_marker" | tr -d ' ')" -eq 1 ]]
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" setup \
+    --project "$repo" \
+    --profile "$missing_profile" \
+    --tool claude \
+    --dry-run 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Profile not found: $missing_profile"
+  assert_not_contains "$output" "Agent Rails Setup"
+
+  printf 'false\n' > "$invalid_profile"
+  set +e
+  output="$("$AGENT_RAILS_BIN" setup \
+    --project "$repo" \
+    --profile "$invalid_profile" \
+    --tool claude \
+    --dry-run 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Profile could not be sourced: $invalid_profile"
+  assert_not_contains "$output" "Agent Rails Setup"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" setup \
+    --project "$TMP_ROOT/setup-python-target-context-missing-project" \
+    --profile "$profile" \
+    --tool claude \
+    --dry-run 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Project directory not found: $TMP_ROOT/setup-python-target-context-missing-project"
+}
+
 run_core_tests() {
   run_test test_init_prints_shell_setup "init prints shell setup"
   run_test test_init_without_project_stays_project_neutral "init stays project-neutral by default"
+  run_test test_python_init_application_module "Python Init Application"
+  run_test test_python_skills_install_module "Python Skills Install Application"
   run_test test_version_command_reads_version_file "version command reads VERSION"
+  run_test test_python_public_cli_module "Python Public CLI dispatcher"
+  run_test test_top_level_shell_is_thin_python_bootstrap "top-level Shell remains a thin Python bootstrap"
+  run_test test_top_level_python_bootstrap_ignores_shadow_and_stale_home "top-level Python bootstrap ignores Target Project shadow and stale home"
   run_test test_plugin_manifests_match_version_file "plugin manifests match VERSION"
   run_test test_changelog_contains_version_file "changelog contains VERSION"
+  run_test test_python_update_application_module "Python Update Application Service"
   run_test test_update_requires_explicit_tool "update requires an explicit tool"
   run_test test_update_claude_dry_run_sequences_project_refresh "update refreshes Claude with Claude doctor"
   run_test test_update_codex_uses_codex_install_and_doctor "update refreshes Codex with Codex doctor"
   run_test test_update_opencode_uses_selected_adapter_mode "update forwards the selected OpenCode adapter mode"
   run_test test_update_rejects_claude_hooks_for_other_tools "update rejects Claude-only hooks for other tools"
   run_test test_update_falls_back_from_missing_legacy_kit_profile "update falls back from missing legacy kit profile"
+  run_test test_update_uses_python_target_context_without_loading_profile "update uses Python Target Project Context without loading Profile"
   run_test test_upgrade_self_rejects_tool "upgrade self rejects project tool selection"
   run_test test_upgrade_self_only_skips_project_refresh "upgrade self skips project refresh"
   run_test test_release_update_skips_source_only_test_suite "release update skips source-only test suite"
   run_test test_release_build_creates_installable_assets "release build creates installable assets"
-  run_test test_release_build_handles_tar_sigpipe_behavior "release build handles tar SIGPIPE behavior"
+  run_test test_python_release_build_module "Python Release Build Application"
+  run_test test_python_release_install_module "Python Release Install Application"
   run_test test_release_installer_supports_non_git_self_upgrade "release install supports non-git self-upgrade"
   run_test test_release_self_upgrade_switches_to_new_version "release self-upgrade switches versions"
   run_test test_release_installer_rejects_checksum_mismatch "release installer rejects checksum mismatch"
   run_test test_codex_install_and_uninstall_dry_run "codex install/uninstall dry-run"
+  run_test test_python_codex_adapter_module "Python Codex Adapter Application"
+  run_test test_codex_rejects_action_specific_options "Codex rejects action-specific options"
+  run_test test_codex_preserves_external_command_exit_status "Codex preserves external command exit status"
+  run_test test_codex_uses_python_target_context_without_loading_profile "Codex uses Python Target Project Context without loading Profile"
+  run_test test_python_setup_application_module "Python Setup Application Service"
+  run_test test_setup_preserves_child_error_events_and_exit_status "Setup preserves child error events and exit status"
   run_test test_setup_claude_dry_run_uses_local_adapter_and_doctor "setup configures Claude and plans doctor"
   run_test test_setup_auto_detects_single_tool "setup auto-detects one tool"
   run_test test_setup_auto_requires_choice_for_multiple_tools "setup requires a choice for multiple tools"
   run_test test_setup_project_mode_reaches_opencode "setup forwards project mode to OpenCode"
+  run_test test_setup_uses_python_target_context "setup uses Python Target Project Context"
 }

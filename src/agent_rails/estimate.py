@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from typing import Sequence
 
+from .config.profile import ProfileLoadError, load_shell_profile
 from .models.presets import ResolvedModel, resolve_model
 from .models.tokenizer import TokenCount, TokenizerSelectionError, count_tokens
 
@@ -21,6 +22,15 @@ Examples:
 Use --tokenizer command for exact Qwen/GLM tokenizers when a local tokenizer command is available.
 Without a tokenizer dependency, auto falls back to a character estimate.
 """
+
+ESTIMATE_PROFILE_VARIABLES = (
+    "AGENT_RAILS_MODEL",
+    "AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE",
+    "AGENT_RAILS_TOKENIZER",
+    "AGENT_RAILS_TOKENIZER_CMD",
+    "AGENT_RAILS_TOKENIZER_PATH",
+    "AGENT_RAILS_TIKTOKEN_ENCODING",
+)
 
 
 class EstimateArgumentParser(argparse.ArgumentParser):
@@ -154,15 +164,55 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     args = build_parser().parse_args(args_list)
 
-    model_name = args.model or os.environ.get("AGENT_RAILS_MODEL") or "generic"
+    effective_environment = dict(os.environ)
+    profile_path: Path | None = None
+    if args.profile is not None:
+        profile_path = Path(args.profile)
+    else:
+        kit_home = effective_environment.get("AGENT_RAILS_HOME", "")
+        if kit_home:
+            profile_path = Path(kit_home) / "profiles/default.profile"
+    if profile_path is not None and profile_path.is_file():
+        try:
+            loaded = load_shell_profile(
+                profile_path,
+                environment=effective_environment,
+                variables=ESTIMATE_PROFILE_VARIABLES,
+                working_directory=Path.cwd(),
+                capture_exported_environment=False,
+            )
+        except (ProfileLoadError, FileNotFoundError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        effective_environment.update(loaded.values)
+
+    model_name = (
+        args.model
+        or effective_environment.get("AGENT_RAILS_MODEL")
+        or "generic"
+    )
     chars_per_token = normalize_positive_int(
-        args.chars_per_token or os.environ.get("AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE", "2"),
+        args.chars_per_token
+        or effective_environment.get("AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE", "2"),
         2,
     )
-    tokenizer = args.tokenizer or os.environ.get("AGENT_RAILS_TOKENIZER") or "auto"
-    tokenizer_command = args.tokenizer_command or os.environ.get("AGENT_RAILS_TOKENIZER_CMD", "")
-    tokenizer_path = args.tokenizer_path or os.environ.get("AGENT_RAILS_TOKENIZER_PATH", "")
-    tiktoken_encoding = os.environ.get("AGENT_RAILS_TIKTOKEN_ENCODING", "cl100k_base")
+    tokenizer = (
+        args.tokenizer
+        or effective_environment.get("AGENT_RAILS_TOKENIZER")
+        or "auto"
+    )
+    tokenizer_command = (
+        args.tokenizer_command
+        or effective_environment.get("AGENT_RAILS_TOKENIZER_CMD", "")
+    )
+    tokenizer_path = (
+        args.tokenizer_path
+        or effective_environment.get("AGENT_RAILS_TOKENIZER_PATH", "")
+    )
+    tiktoken_encoding = effective_environment.get(
+        "AGENT_RAILS_TIKTOKEN_ENCODING",
+        "cl100k_base",
+    )
 
     try:
         input_value = read_input(args.file, args.text)

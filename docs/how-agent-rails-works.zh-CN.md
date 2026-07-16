@@ -187,7 +187,7 @@ flowchart LR
 
 ## GitHub Release 更新原理
 
-Agent Rails 是多文件 shell kit，因此 Release 分发完整 archive，而不是只分发一个仍依赖源码目录的 wrapper。CLI 根据自身所在位置区分 Git checkout 与 Release Install。
+Agent Rails 是带少量宿主 bootstrap 的多文件 Python kit，因此 Release 分发完整 archive，而不是只分发一个仍依赖源码目录的 wrapper。CLI 根据自身所在位置区分 Git checkout 与 Release Install。
 
 ```mermaid
 flowchart TD
@@ -246,11 +246,12 @@ Release 安装器在切换前完成下载和校验；任何 checksum、archive l
 | 关注点 | 实现入口 |
 | --- | --- |
 | CLI 路由 | [`bin/agent-rails`](../bin/agent-rails) |
-| Target Project Context | [`scripts/agent-target-project.sh`](../scripts/agent-target-project.sh) |
-| Profile 与个人路径 | [`scripts/agent-paths.sh`](../scripts/agent-paths.sh) |
-| SessionStart | [`hooks/agent-rails-session-start.sh`](../hooks/agent-rails-session-start.sh) |
-| Task Pack | [`scripts/agent-context-pack.sh`](../scripts/agent-context-pack.sh) |
-| Git Scope | [`scripts/agent-git-scope.sh`](../scripts/agent-git-scope.sh) |
-| 验证与发布检查 | [`scripts/agent-check.sh`](../scripts/agent-check.sh)、[`scripts/agent-publish-check.sh`](../scripts/agent-publish-check.sh) |
-| Adapter 所有权 | [`scripts/agent-adapter-workspace.sh`](../scripts/agent-adapter-workspace.sh) |
-| 更新与 Release 安装 | [`scripts/agent-update.sh`](../scripts/agent-update.sh)、[`scripts/agent-release-install.sh`](../scripts/agent-release-install.sh) |
+| Target Project Context | [`src/agent_rails/config/target_project.py`](../src/agent_rails/config/target_project.py) |
+| Profile 与个人路径 | [`src/agent_rails/config/profile.py`](../src/agent_rails/config/profile.py)、[`src/agent_rails/core/paths.py`](../src/agent_rails/core/paths.py) |
+| SessionStart | [`src/agent_rails/session_start.py`](../src/agent_rails/session_start.py)、薄 [`hooks/agent-rails-session-start.sh`](../hooks/agent-rails-session-start.sh) bootstrap |
+| Task Pack | [`src/agent_rails/context/pack_application.py`](../src/agent_rails/context/pack_application.py)、[`src/agent_rails/context`](../src/agent_rails/context) |
+| Git Scope | [`src/agent_rails/git/scope.py`](../src/agent_rails/git/scope.py) |
+| 敏感输出护栏 | [`src/agent_rails/security/sensitive_output.py`](../src/agent_rails/security/sensitive_output.py) |
+| 验证与发布检查 | [`src/agent_rails/verification/plan.py`](../src/agent_rails/verification/plan.py)、[`src/agent_rails/verification/check_application.py`](../src/agent_rails/verification/check_application.py)、[`src/agent_rails/verification/publish_check.py`](../src/agent_rails/verification/publish_check.py) |
+| Adapter 所有权与 OpenCode 生命周期 | [`src/agent_rails/adapters/workspace.py`](../src/agent_rails/adapters/workspace.py)、[`src/agent_rails/adapters/content.py`](../src/agent_rails/adapters/content.py)、[`src/agent_rails/adapters/opencode.py`](../src/agent_rails/adapters/opencode.py) |
+| 更新与 Release 安装 | [`src/agent_rails/update_application.py`](../src/agent_rails/update_application.py)、[`src/agent_rails/release`](../src/agent_rails/release) |

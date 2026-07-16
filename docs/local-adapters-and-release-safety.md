@@ -12,7 +12,8 @@ For a narrative overview of the complete system and its diagrams, see [How Agent
 - The request plugin uses OpenCode's `experimental.chat.system.transform` hook. It reads the current session, derives the input ceiling from `model.limit`, reserves response/safety space, and injects a token-budgeted Pack on each model request.
 - Candidate context is refreshed for each user message and reused within that turn. The plugin never trims OpenCode's own conversation history.
 - Installation uses local Git excludes by default and does not modify the user's global OpenCode configuration.
-- Installed skill names are recorded in adapter-local inventories (`.claude/.agent-rails-managed-skills` and `.opencode/.agent-rails-managed-skills`); uninstall removes only those exact names and leaves unrelated skills intact.
+- Installed skills are recorded in strict v2 adapter-local inventories (`.claude/.agent-rails-managed-skills` and `.opencode/.agent-rails-managed-skills`) with no-follow tree fingerprints. Non-force refresh/uninstall only replaces or removes an unchanged owned tree, preserves modified or unowned skills, and retains survivor ownership for an explicit later cleanup.
+- OpenCode records exact config ownership in `.opencode/.agent-rails-state.json`; uninstall removes only plugin/schema values that state proves Agent Rails inserted, while legacy recovery accepts only exact paths derived from a generated plugin.
 - `doctor` verifies the generated integration, while `uninstall` removes only Agent Rails-managed artifacts and preserves tracked files unless explicitly forced.
 
 ### Adapter Visibility Modes
@@ -31,7 +32,11 @@ For a narrative overview of the complete system and its diagrams, see [How Agent
 - Existing user-authored content outside the managed Agent Rails block remains intact.
 - Codex, Claude, and OpenCode resolve profiles through the same project-aware rules.
 
-Generated-file recognition, managed-skill inventory, tracked-path protection, generated-file writes, skill installation/removal, and local-ignore block lifecycle live in the shared Managed Adapter Workspace Module. Guide and pack/lite/check command rendering lives in the shared Adapter Content Module, with tool-specific guides and frontmatter behind one rendering Interface. Adapter entrypoints retain tool-specific CLI behavior, paths, configuration merges, and reminder or instruction blocks; the shared Interfaces preserve existing on-disk formats and output semantics.
+Generated-file recognition, managed-skill inventory, tracked-path protection, generated-file writes, skill installation/removal, and local-ignore block lifecycle live in the shared Python Managed Adapter Workspace Module. Generated guides, the Claude project block, and pack/lite/check commands live in the typed Python Adapter Content Module, with tool-specific guides, frontmatter, shell-safe arguments, and lossless SessionStart Profile metadata behind one rendering Interface. The Python Claude and OpenCode Application Services retain tool-specific paths, configuration, marked rules, and personal reminder policy. The Codex Application Service owns plugin registration/removal, Profile-free project inspection, and optional Doctor repair composition. The Public CLI enters all three through the isolated Python helper without lifecycle Shells.
+
+The Python SessionStart Application Service consumes that generated Profile metadata without executing it, resolves the exact host-supplied worktree when available, ignores symlinked marker files, makes control characters visible, and renders one fixed guardrail contract into Claude plain text or the Codex JSON envelope. Host-private input fields are not copied into context; the remaining hook Shell only enters the trusted Python CLI.
+
+The Python Doctor Application Service owns cross-cutting read-only diagnosis and explicit repair composition. It loads the Profile and optional environment file through one isolated seam, reports their failures separately, suppresses online-memory content and adapter diagnostics, and delegates `--fix` to the Claude lifecycle instead of duplicating workspace ownership. Project and kit probes use bounded no-follow reads, while visible escaping prevents configured paths or control characters from forging health results.
 
 ### Shared Model Presets
 
@@ -39,7 +44,7 @@ Model aliases, canonical names, context and throughput limits, and Pack Mode tok
 
 ### Progressive CLI Surface
 
-The default user journey is intentionally limited to `setup`, `run`, and `verify`. These are orchestration facades, not replacement domain implementations: Setup resolves Target Project Context and delegates to existing adapter installers and Doctors; Run keeps the existing Task Pack workflow; Verify delegates plan execution to Agent Check and optionally adds publish check. All lower-level commands remain compatible and are documented in the bilingual CLI reference.
+The default user journey is intentionally limited to `setup`, `run`, and `verify`. The top-level Python Public CLI Dispatcher owns the command tree, version/home state, exact isolated-helper argv, and legacy project-cwd seam behind an 11-line symlink-aware bootstrap. The three journey commands are Python orchestration Facades entered directly through that helper: Setup resolves one Target Project Context and delegates to existing adapter installers and Doctors; Run prepares the existing Task Pack and estimates that exact artifact in process; Verify delegates plan execution to Agent Check and only after success optionally adds Publish Check. All lower-level commands remain compatible and are documented in the bilingual CLI reference.
 
 Automatic Setup proceeds only when exactly one supported coding-agent CLI is detected. Multiple detected tools require an explicit `--tool` selection, while `--tool all` records deliberate intent to install every supported personal integration. This avoids turning convenience into an unexpected user-level or project-local mutation.
 
@@ -66,6 +71,8 @@ The shared Target Project Context Module canonicalizes explicit `--project` path
 
 Automatic Task Pack sanitization is deliberately conservative: placeholders and tokenizer configuration remain readable, while supported secret-bearing values are replaced with `<redacted>`. Publish scanning reuses the same detection grammar but excludes recognizable code expressions. For tracked files it scans only added committed, staged, and unstaged diff lines and maps findings back to source paths and line numbers; untracked text files are scanned in full. Tests remain in scope when their lines change, while unchanged fixtures and removed values do not become release findings. Encoded envelopes and unnamed high-entropy material still require explicit operator care.
 
+Publish Check now composes Git Scope, Verification Plan, repository metadata, and Sensitive Output entirely in Python after one allowlisted Profile load. It freezes the resolved target commit before scanning, anchors untracked reads below the Target Project without following symlinks, removes remote URL credentials/query data before the report, and guarantees that `--no-secret-scan` does not inspect changed file content.
+
 ### Publish Baseline Safety
 
 The remote branch tip is a source-control baseline, not proof of what is deployed. When the implicit upstream is missing or is identical to the target revision, publish checking reports `Deployment delta: UNRESOLVED` and requires:
@@ -81,26 +88,26 @@ Default-base policy, commit-ref validation, merge-base resolution, and committed
 
 ### Release Distribution Safety
 
-GitHub Release distribution packages the complete multi-file kit, not only `bin/agent-rails`. The standalone installer verifies the published SHA-256 digest and archive layout before creating a version directory, then switches `current` and the user CLI through temporary symlinks. Existing non-symlink paths are treated as user-owned and cause a hard failure.
+GitHub Release distribution packages the complete multi-file kit, not only `bin/agent-rails`. The standalone standard-library Python installer verifies the published SHA-256 digest and archive layout before atomically publishing a complete version directory, then switches `current` and the user CLI through temporary symlinks. The adjacent `install.sh` is only a cold-start bootstrap. Existing non-symlink paths are treated as user-owned and cause a hard failure; a partial commit restores the previous managed links and metadata.
 
-Release installation does not change Target Project or Adapter ownership rules. `upgrade self` only changes the kit and keeps older version directories for rollback; the wider `update --tool claude|codex|opencode` command refreshes exactly the selected target Adapter. Source checkouts remain supported through the original fast-forward pull path.
+Release installation does not change Target Project or Adapter ownership rules. The Python Update Application Service keeps `upgrade self` project-neutral, selects clean fast-forward Git versus verified Release update, skips source-only tests for Release installs, flushes output before switching versions, and refreshes exactly the selected target Adapter for `update --tool claude|codex|opencode`. Older Release directories remain available for rollback.
 
-The tag workflow validates that `v<VERSION>` points to a commit contained in `main`, reruns the full suite, builds the fixed-name assets, verifies their digest, and creates the Release through GitHub CLI. See [GitHub Release Distribution](./github-release-distribution.md) for the asset and rollback contract.
+The Python Release Builder selects tracked files through isolated Git, optionally adds non-ignored worktree files for local smoke, skips deleted worktree paths, and emits a deterministic single-root archive without host metadata such as macOS AppleDouble entries. It stages and validates all four fixed-name assets before transactional publication. The tag workflow validates that `v<VERSION>` points to a commit contained in `main`, reruns the full suite, builds the assets, executes the paired standalone installer smoke, verifies the digest, and creates the Release through GitHub CLI. See [GitHub Release Distribution](./github-release-distribution.md) for the asset and rollback contract.
 
 ## Verification
 
 The implementation is covered by the repository test suite, including:
 
-- OpenCode install, doctor, refresh, exact-inventory uninstall, configuration merge, user-file preservation, legacy inventory migration, local-ignore behavior, and portable local-to-project promotion.
-- Claude managed-file refresh, exact-inventory uninstall, same-path user-file preservation, and portable local-to-project promotion behavior.
-- The Managed Adapter Workspace Interface, including legacy generated-file signatures, inventory validation, tracked/unmanaged preservation, skill lifecycle, and idempotent local-ignore blocks.
+- OpenCode install, doctor, fingerprinted v2 inventory refresh/uninstall, configuration merge, modified and legacy-unowned skill preservation, local-ignore behavior, and portable local-to-project promotion.
+- Claude strict-v2 managed-file refresh, exact uninstall, same-path user-file preservation, local-to-project promotion, marked-rule validation, global reminder force policy, SessionStart settings preservation, and real/dry-run preflight behavior.
+- The Managed Adapter Workspace Interface, including legacy generated-file signatures, strict ownership validation, atomic no-follow skill replacement/removal, tracked/unmanaged preservation, survivor inventory handling, and idempotent local-ignore blocks.
 - The shared Adapter Content Interface, with byte-for-byte compatibility checks for Claude and OpenCode generated guides and commands.
 - SessionStart target/profile and sensitive-output guidance.
 - Task Pack `0600` permissions and generated guidance sections.
 - Task Pack failure behavior for non-file output destinations and the shared Git Scope Module Interface, including target-only snapshots that exclude working-tree changes.
 - The shared Model Preset Interface, including alias normalization, Pack Mode budgets, `generic`, unknown models, and reset behavior between loads.
 - The shared Target Project Context Interface, including nested Git paths, Profile-aware names, explicit worktree slugs, missing Profiles, and default Task Pack paths.
-- Setup tool selection and dry-run orchestration, plus Verify execution, preview, and publish composition.
+- Setup tool selection, shared-Context install/Doctor composition, and dry-run orchestration; Run Pack/estimate composition; Verify execution, preview, failure short-circuiting, and publish composition.
 - Release asset construction, checksum rejection, non-Git installation, stable CLI linkage, and project-neutral self-upgrade.
 - Resolved, unresolved, and invalid publish-baseline cases, plus invalid-base rejection in `pack` and `check`.
 

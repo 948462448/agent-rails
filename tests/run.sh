@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lightweight e2e test runner for Agent Rails shell entrypoints.
+# Lightweight e2e test runner for Agent Rails public and runtime contracts.
 
 set -euo pipefail
 
@@ -9,6 +9,7 @@ export AGENT_RAILS_HOME="$ROOT_DIR"
 AGENT_RAILS_BIN="$ROOT_DIR/bin/agent-rails"
 EXPECTED_AGENT_RAILS_VERSION="$(awk 'NF { print $1; exit }' "$ROOT_DIR/VERSION")"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agent-rails-tests.XXXXXX")"
+TMP_ROOT="$(cd "$TMP_ROOT" && pwd -P)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 # shellcheck source=tests/lib/test-helpers.sh
@@ -26,7 +27,7 @@ usage() {
   cat <<'USAGE'
 Usage: bash tests/run.sh [core|adapters|workflows|context ...]
 
-With no suite names, runs all 123 tests in their historical order.
+With no suite names, runs all 171 tests in their historical order.
 USAGE
 }
 

@@ -187,7 +187,7 @@ Sensitive-output behavior is also purpose-specific. Task Packs favor conservativ
 
 ## How GitHub Release Updates Work
 
-Agent Rails is a multi-file shell kit, so a Release distributes a complete archive instead of a wrapper that still depends on a source directory. The CLI distinguishes a Git checkout from a Release Install using its own resolved location.
+Agent Rails is a multi-file Python kit with small host bootstraps, so a Release distributes a complete archive instead of a wrapper that still depends on a source directory. The CLI distinguishes a Git checkout from a Release Install using its own resolved location.
 
 ```mermaid
 flowchart TD
@@ -246,11 +246,12 @@ Together, these rules enforce one outcome: Agent Rails may do less, but it must 
 | Concern | Implementation entrypoint |
 | --- | --- |
 | CLI routing | [`bin/agent-rails`](../bin/agent-rails) |
-| Target Project Context | [`scripts/agent-target-project.sh`](../scripts/agent-target-project.sh) |
-| Profiles and personal paths | [`scripts/agent-paths.sh`](../scripts/agent-paths.sh) |
-| SessionStart | [`hooks/agent-rails-session-start.sh`](../hooks/agent-rails-session-start.sh) |
-| Task Pack | [`scripts/agent-context-pack.sh`](../scripts/agent-context-pack.sh) |
-| Git Scope | [`scripts/agent-git-scope.sh`](../scripts/agent-git-scope.sh) |
-| Verification and publish check | [`scripts/agent-check.sh`](../scripts/agent-check.sh), [`scripts/agent-publish-check.sh`](../scripts/agent-publish-check.sh) |
-| Adapter ownership | [`scripts/agent-adapter-workspace.sh`](../scripts/agent-adapter-workspace.sh) |
-| Update and Release install | [`scripts/agent-update.sh`](../scripts/agent-update.sh), [`scripts/agent-release-install.sh`](../scripts/agent-release-install.sh) |
+| Target Project Context | [`src/agent_rails/config/target_project.py`](../src/agent_rails/config/target_project.py) |
+| Profiles and personal paths | [`src/agent_rails/config/profile.py`](../src/agent_rails/config/profile.py), [`src/agent_rails/core/paths.py`](../src/agent_rails/core/paths.py) |
+| SessionStart | [`src/agent_rails/session_start.py`](../src/agent_rails/session_start.py), thin [`hooks/agent-rails-session-start.sh`](../hooks/agent-rails-session-start.sh) bootstrap |
+| Task Pack | [`src/agent_rails/context/pack_application.py`](../src/agent_rails/context/pack_application.py), [`src/agent_rails/context`](../src/agent_rails/context) |
+| Git Scope | [`src/agent_rails/git/scope.py`](../src/agent_rails/git/scope.py) |
+| Sensitive Output Guard | [`src/agent_rails/security/sensitive_output.py`](../src/agent_rails/security/sensitive_output.py) |
+| Verification and publish check | [`src/agent_rails/verification/plan.py`](../src/agent_rails/verification/plan.py), [`src/agent_rails/verification/check_application.py`](../src/agent_rails/verification/check_application.py), [`src/agent_rails/verification/publish_check.py`](../src/agent_rails/verification/publish_check.py) |
+| Adapter ownership and OpenCode lifecycle | [`src/agent_rails/adapters/workspace.py`](../src/agent_rails/adapters/workspace.py), [`src/agent_rails/adapters/content.py`](../src/agent_rails/adapters/content.py), [`src/agent_rails/adapters/opencode.py`](../src/agent_rails/adapters/opencode.py) |
+| Update and Release install | [`src/agent_rails/update_application.py`](../src/agent_rails/update_application.py), [`src/agent_rails/release`](../src/agent_rails/release) |

@@ -2,22 +2,35 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import os
+from pathlib import Path
 import shlex
-import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "src"))
 
-from agent_rails.estimate import EstimateInput, help_requested, render_estimate
+from agent_rails.config.profile import load_shell_profile
+from agent_rails.estimate import EstimateInput, help_requested, main, render_estimate
 from agent_rails.models.presets import resolve_model
 from agent_rails.models.tokenizer import TokenCount, TokenCounter, count_tokens
+
+
+ESTIMATE_PROFILE_VARIABLES = {
+    "AGENT_RAILS_MODEL",
+    "AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE",
+    "AGENT_RAILS_TOKENIZER",
+    "AGENT_RAILS_TOKENIZER_CMD",
+    "AGENT_RAILS_TOKENIZER_PATH",
+    "AGENT_RAILS_TIKTOKEN_ENCODING",
+}
 
 
 class ModelPresetTest(unittest.TestCase):
@@ -34,83 +47,24 @@ class ModelPresetTest(unittest.TestCase):
         self.assertFalse(unknown.known)
         self.assertEqual(unknown.canonical, "custom-model")
 
-    def test_compatibility_shell_reads_the_python_preset_source(self) -> None:
-        shell_module = ROOT / "scripts" / "agent-model-presets.sh"
-        self.assertNotIn("case \"$model_key\"", shell_module.read_text(encoding="utf-8"))
-        shell_script = r'''
-source "$1"
-agent_model_preset_load "$2"
-printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
-  "$AGENT_RAILS_MODEL_CANONICAL" \
-  "$AGENT_RAILS_MODEL_KNOWN" \
-  "$AGENT_RAILS_MODEL_PRESET_FOUND" \
-  "$AGENT_RAILS_MODEL_CONTEXT_TOKENS" \
-  "$AGENT_RAILS_MODEL_MAX_INPUT_TOKENS" \
-  "$AGENT_RAILS_MODEL_MAX_INPUT_THINKING_TOKENS" \
-  "$AGENT_RAILS_MODEL_MAX_OUTPUT_TOKENS" \
-  "$AGENT_RAILS_MODEL_MAX_REASONING_TOKENS" \
-  "$AGENT_RAILS_MODEL_RPM" \
-  "$AGENT_RAILS_MODEL_TPM" \
-  "$AGENT_RAILS_MODEL_LITE_TOKENS" \
-  "$AGENT_RAILS_MODEL_NORMAL_TOKENS" \
-  "$AGENT_RAILS_MODEL_DEEP_TOKENS:$AGENT_RAILS_MODEL_AUDIT_TOKENS"
-'''
-        for model_name in ("qwen-3.7-max", "deepseekv4pro", "glm51", "generic", "custom-model"):
-            shell_values = subprocess.run(
-                ["bash", "-c", shell_script, "bash", str(shell_module), model_name],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            resolved = resolve_model(model_name)
-            preset = resolved.preset
-            python_values = "|".join(
-                [
-                    resolved.canonical,
-                    "1" if resolved.known else "0",
-                    "1" if preset is not None else "0",
-                    "" if preset is None else str(preset.context_tokens),
-                    "" if preset is None else str(preset.max_input_tokens),
-                    "" if preset is None or preset.max_input_thinking_tokens is None else str(preset.max_input_thinking_tokens),
-                    "" if preset is None else str(preset.max_output_tokens),
-                    "" if preset is None or preset.max_reasoning_tokens is None else str(preset.max_reasoning_tokens),
-                    "" if preset is None or preset.rpm is None else str(preset.rpm),
-                    "" if preset is None or preset.tpm is None else str(preset.tpm),
-                    "" if preset is None else str(preset.pack_budgets["lite"]),
-                    "" if preset is None else str(preset.pack_budgets["normal"]),
-                    ":" if preset is None else f'{preset.pack_budgets["deep"]}:{preset.pack_budgets["audit"]}',
-                ]
-            )
-            self.assertEqual(shell_values, python_values, model_name)
-
-    def test_compatibility_shell_quotes_unknown_model_names(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="agent-rails-model-quote-") as temp_dir:
-            marker = Path(temp_dir) / "must-not-exist"
-            shell_script = r'''
-source "$1"
-agent_model_preset_load "$2"
-printf '%s\n' "$AGENT_RAILS_MODEL_CANONICAL"
-'''
-            model_name = f"custom-$(touch {shlex.quote(str(marker))})"
-            output = subprocess.run(
-                [
-                    "bash",
-                    "-c",
-                    shell_script,
-                    "bash",
-                    str(ROOT / "scripts" / "agent-model-presets.sh"),
-                    model_name,
-                ],
-                env={**os.environ, "AGENT_RAILS_HOME": str(ROOT)},
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            self.assertEqual(output, model_name)
-            self.assertFalse(marker.exists())
-
-
 class TokenCounterTest(unittest.TestCase):
+    def test_command_adapter_runs_in_explicit_target_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-tokenizer-test-") as temp_dir:
+            working_directory = Path(temp_dir) / "project"
+            working_directory.mkdir()
+            command = (
+                f'test "$PWD" = {shlex.quote(str(working_directory.resolve()))} '
+                "&& printf 7"
+            )
+            counter = TokenCounter(
+                "command",
+                2,
+                command=command,
+                working_directory=working_directory,
+            )
+
+            self.assertEqual(counter.count("cwd")[0], 7)
+
     def test_char_and_command_adapters_share_one_interface(self) -> None:
         char_count = count_tokens("abcdef", "char", 2)
         self.assertEqual(char_count, TokenCount(tokens=3, tokenizer="char-estimate"))
@@ -172,6 +126,264 @@ Max input in thinking mode: 166000 tokens
 Max output: 128000 tokens
 """,
         )
+
+
+class EstimateMainProfileTest(unittest.TestCase):
+    def run_main(
+        self,
+        argv: list[str],
+        *,
+        environment: dict[str, str],
+    ) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            status = main(argv)
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def environment(self, kit_home: Path) -> dict[str, str]:
+        return {
+            "AGENT_RAILS_HOME": str(kit_home),
+            "HOME": str(kit_home / "home"),
+            "PATH": "/usr/bin:/bin",
+        }
+
+    def write_profile(self, path: Path, lines: list[str]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_explicit_shell_profile_crosses_only_estimate_fields(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-estimate-profile-") as temp_dir:
+            kit_home = Path(temp_dir) / "kit"
+            profile = Path(temp_dir) / "estimate.profile"
+            self.write_profile(
+                profile,
+                [
+                    'AGENT_RAILS_MODEL="qwen3.7-max"',
+                    'AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="3"',
+                    'AGENT_RAILS_TOKENIZER="command"',
+                    'AGENT_RAILS_TOKENIZER_CMD="printf 17"',
+                    'AGENT_RAILS_TOKENIZER_PATH="profile-tokenizer"',
+                    'AGENT_RAILS_TIKTOKEN_ENCODING="profile-encoding"',
+                    'export AGENT_RAILS_PACK_MODE="audit"',
+                    'export ESTIMATE_PROFILE_SECRET="must-not-cross"',
+                ],
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            environment = self.environment(kit_home)
+            with (
+                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch(
+                    "agent_rails.estimate.load_shell_profile",
+                    wraps=load_shell_profile,
+                ) as profile_loader,
+                mock.patch(
+                    "agent_rails.estimate.count_tokens",
+                    return_value=TokenCount(tokens=17, tokenizer="command"),
+                ) as token_counter,
+                redirect_stdout(stdout),
+                redirect_stderr(stderr),
+            ):
+                status = main(["--profile", str(profile), "abcdef"])
+                self.assertNotIn("AGENT_RAILS_PACK_MODE", os.environ)
+                self.assertNotIn("ESTIMATE_PROFILE_SECRET", os.environ)
+
+            self.assertEqual(status, 0)
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertIn("Model: qwen3.7-max (preset)\n", stdout.getvalue())
+            token_counter.assert_called_once_with(
+                "abcdef",
+                "command",
+                3,
+                "printf 17",
+                "profile-tokenizer",
+                "profile-encoding",
+            )
+            self.assertEqual(profile_loader.call_count, 1)
+            self.assertEqual(
+                set(profile_loader.call_args.kwargs["variables"]),
+                ESTIMATE_PROFILE_VARIABLES,
+            )
+            self.assertFalse(
+                profile_loader.call_args.kwargs.get(
+                    "capture_exported_environment", False
+                )
+            )
+
+    def test_cli_options_override_explicit_profile(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-estimate-profile-") as temp_dir:
+            kit_home = Path(temp_dir) / "kit"
+            profile = Path(temp_dir) / "estimate.profile"
+            self.write_profile(
+                profile,
+                [
+                    'AGENT_RAILS_MODEL="qwen3.7-max"',
+                    'AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="9"',
+                    'AGENT_RAILS_TOKENIZER="command"',
+                    'AGENT_RAILS_TOKENIZER_CMD="printf 99"',
+                    'AGENT_RAILS_TOKENIZER_PATH="profile-tokenizer"',
+                    'AGENT_RAILS_TIKTOKEN_ENCODING="profile-encoding"',
+                ],
+            )
+            with mock.patch(
+                "agent_rails.estimate.count_tokens",
+                return_value=TokenCount(tokens=3, tokenizer="char-estimate"),
+            ) as token_counter:
+                status, stdout, stderr = self.run_main(
+                    [
+                        "--profile",
+                        str(profile),
+                        "--model",
+                        "glm5.1",
+                        "--chars-per-token",
+                        "2",
+                        "--tokenizer",
+                        "char",
+                        "--tokenizer-command",
+                        "printf 44",
+                        "--tokenizer-path",
+                        "cli-tokenizer",
+                        "abcdef",
+                    ],
+                    environment=self.environment(kit_home),
+                )
+
+            self.assertEqual(status, 0)
+            self.assertEqual(stderr, "")
+            self.assertIn("Model: glm5.1 (preset)\n", stdout)
+            token_counter.assert_called_once_with(
+                "abcdef",
+                "char",
+                2,
+                "printf 44",
+                "cli-tokenizer",
+                "profile-encoding",
+            )
+
+    def test_default_kit_profile_is_loaded_without_profile_option(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-estimate-default-") as temp_dir:
+            kit_home = Path(temp_dir) / "kit"
+            self.write_profile(
+                kit_home / "profiles" / "default.profile",
+                [
+                    'AGENT_RAILS_MODEL="qwen3.7-max"',
+                    'AGENT_RAILS_TOKENIZER="char"',
+                    'AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="3"',
+                ],
+            )
+
+            status, stdout, stderr = self.run_main(
+                ["abcdef"], environment=self.environment(kit_home)
+            )
+
+            self.assertEqual(status, 0)
+            self.assertEqual(stderr, "")
+            self.assertIn("Estimated tokens: 2\n", stdout)
+            self.assertIn("Model: qwen3.7-max (preset)\n", stdout)
+
+    def test_help_does_not_execute_profile(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-estimate-help-") as temp_dir:
+            kit_home = Path(temp_dir) / "kit"
+            marker = Path(temp_dir) / "profile-executed"
+            profile = Path(temp_dir) / "estimate.profile"
+            self.write_profile(
+                profile,
+                [
+                    f"touch {shlex.quote(str(marker))}",
+                    "exit 19",
+                ],
+            )
+
+            status, stdout, stderr = self.run_main(
+                ["--profile", str(profile), "--help"],
+                environment=self.environment(kit_home),
+            )
+
+            self.assertEqual(status, 0)
+            self.assertTrue(stdout.startswith("Usage: agent-rails estimate "))
+            self.assertEqual(stderr, "")
+            self.assertFalse(marker.exists())
+
+    def test_missing_explicit_and_default_profiles_are_silent(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-estimate-missing-") as temp_dir:
+            kit_home = Path(temp_dir) / "kit"
+            cases = (
+                ["--profile", str(Path(temp_dir) / "missing.profile")],
+                [],
+            )
+            for profile_args in cases:
+                with self.subTest(profile_args=profile_args):
+                    status, stdout, stderr = self.run_main(
+                        [
+                            *profile_args,
+                            "--tokenizer",
+                            "char",
+                            "--chars-per-token",
+                            "2",
+                            "abcd",
+                        ],
+                        environment=self.environment(kit_home),
+                    )
+                    self.assertEqual(status, 0)
+                    self.assertEqual(stderr, "")
+                    self.assertIn("Estimated tokens: 2\n", stdout)
+                    self.assertIn("Model: generic (no preset)\n", stdout)
+
+    def test_profile_source_failure_returns_exact_error(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-estimate-failure-") as temp_dir:
+            kit_home = Path(temp_dir) / "kit"
+            profile = Path(temp_dir) / "broken.profile"
+            self.write_profile(profile, ["false"])
+
+            status, stdout, stderr = self.run_main(
+                ["--profile", str(profile), "abc"],
+                environment=self.environment(kit_home),
+            )
+
+            self.assertEqual(status, 2)
+            self.assertEqual(stdout, "")
+            self.assertEqual(
+                stderr,
+                f"Profile could not be sourced: {profile}\n",
+            )
+
+    def test_profile_loading_preserves_caller_cwd_for_relative_file(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-estimate-cwd-") as temp_dir:
+            root = Path(os.path.realpath(temp_dir))
+            kit_home = root / "kit"
+            caller = root / "caller"
+            caller.mkdir()
+            (caller / "input.md").write_text("relative", encoding="utf-8")
+            profile = root / "estimate.profile"
+            self.write_profile(
+                profile,
+                [
+                    f'test "$PWD" = {shlex.quote(str(caller))}',
+                    'AGENT_RAILS_MODEL="qwen3.7-max"',
+                    'AGENT_RAILS_TOKENIZER="char"',
+                    'AGENT_RAILS_CHARS_PER_TOKEN_ESTIMATE="1"',
+                ],
+            )
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(caller)
+                status, stdout, stderr = self.run_main(
+                    ["--profile", str(profile), "--file", "input.md"],
+                    environment=self.environment(kit_home),
+                )
+            finally:
+                os.chdir(previous_cwd)
+
+            self.assertEqual(status, 0)
+            self.assertEqual(stderr, "")
+            self.assertIn("Source: file: input.md\n", stdout)
+            self.assertIn("Estimated tokens: 8\n", stdout)
+            self.assertIn("Model: qwen3.7-max (preset)\n", stdout)
 
 
 if __name__ == "__main__":

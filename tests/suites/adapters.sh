@@ -29,6 +29,7 @@ test_opencode_install_doctor_and_uninstall() {
   assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" '"hookTimeoutMs": 30000'
   assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "sessionStates"
   assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" "AGENT_RAILS_CANDIDATE_OUTPUT"
+  assert_file_contains "$repo/.opencode/plugins/agent-rails.mjs" '"-I",'
   assert_file_contains "$repo/.opencode/AGENT_RAILS.md" "Visible session marker protocol"
   assert_file_contains "$repo/.opencode/command/agent-rails-pack.md" '$ARGUMENTS'
   assert_file_contains "$repo/.opencode/command/agent-rails-lite.md" "--pack-mode lite"
@@ -80,6 +81,10 @@ test_opencode_plugin_migrates_legacy_config_and_preserves_user_entries() {
   printf '# temp\n' > "$repo/README.md"
   git -C "$repo" add README.md
   git_commit "$repo" init
+  {
+    printf 'Agent Rails Version: 0.5.0\n'
+    printf 'Visible session marker protocol\n'
+  } > "$repo/.opencode/AGENT_RAILS.md"
 
   python3 - "$config_path" "$repo_abs" <<'PY'
 import json
@@ -155,187 +160,104 @@ test_opencode_can_promote_local_adapter_to_project_mode() {
   assert_contains "$(git -C "$repo" status --short)" "?? .opencode/"
 }
 
-test_managed_adapter_workspace_module_contract() {
-  local project_dir="$TMP_ROOT/managed-adapter-workspace-module"
-  local adapter_dir="$project_dir/.adapter"
-  local guide_path="$adapter_dir/AGENT_RAILS.md"
-  local pack_path="$adapter_dir/command/agent-rails-pack.md"
-  local lite_path="$adapter_dir/command/agent-rails-lite.md"
-  local check_path="$adapter_dir/command/agent-rails-check.md"
-  local inventory_path="$adapter_dir/.agent-rails-managed-skills"
-  local unmanaged_path="$adapter_dir/command/unmanaged.md"
-  local ignore_path="$project_dir/.git/info/exclude"
-  local listed_skills output
-  mkdir -p "$adapter_dir/command" "$adapter_dir/skills/agent-check"
-  git -C "$project_dir" init -q
-
-  # shellcheck source=scripts/agent-adapter-workspace.sh
-  if [[ ! -f "$ROOT_DIR/scripts/agent-adapter-workspace.sh" ]]; then
-    printf 'Missing Managed Adapter Workspace Module.\n' >&2
-    return 1
-  fi
-  source "$ROOT_DIR/scripts/agent-adapter-workspace.sh" || return 1
-  agent_adapter_workspace_init \
-    "$guide_path" \
-    "$pack_path" \
-    "$lite_path" \
-    "$check_path" \
-    "$inventory_path"
-
-  printf 'team-owned\n' > "$guide_path"
-  printf 'team-owned-skill\n' > "$adapter_dir/skills/agent-check/SKILL.md"
-  git -C "$project_dir" add \
-    .adapter/AGENT_RAILS.md \
-    .adapter/skills/agent-check/SKILL.md
-  git_commit "$project_dir" init
-
-  printf 'Generate and read the Agent Rails Task Pack\nAGENT RAILS: ON\n' > "$pack_path"
-  printf '<!-- agent-rails:generated -->\nstale\n' > "$lite_path"
-  printf 'user-owned\n' > "$unmanaged_path"
-  agent_adapter_workspace_is_generated_file "$pack_path"
-  agent_adapter_workspace_is_generated_file "$lite_path"
-  if agent_adapter_workspace_is_generated_file "$unmanaged_path"; then
-    printf 'Expected unmanaged file not to be recognized as generated: %s\n' "$unmanaged_path" >&2
-    exit 1
-  fi
-
-  {
-    printf 'agent-context-pack\n'
-    printf 'agent-context-pack\n'
-    printf '../invalid\n'
-    printf 'agent-check\n'
-  } > "$inventory_path"
-  agent_adapter_workspace_load_managed_skills 2>/dev/null
-  agent_adapter_workspace_record_managed_skill "agent-check"
-  agent_adapter_workspace_record_managed_skill "agent-release"
-  listed_skills="$(agent_adapter_workspace_list_managed_skills)"
-  assert_contains "$listed_skills" "agent-context-pack"
-  assert_contains "$listed_skills" "agent-release"
-
-  agent_adapter_workspace_configure "$project_dir" ".adapter/skills" 0 0 1 0
-
-  output="$(agent_adapter_workspace_write_generated_file "$guide_path" "replacement")"
-  assert_contains "$output" "Keeping tracked file in local mode"
-  assert_file_contains "$guide_path" "team-owned"
-
-  output="$(agent_adapter_workspace_write_generated_file "$unmanaged_path" "replacement")"
-  assert_contains "$output" "Keeping unmanaged existing file"
-  assert_file_contains "$unmanaged_path" "user-owned"
-
-  agent_adapter_workspace_write_generated_file \
-    "$lite_path" \
-    $'<!-- agent-rails:generated -->\nfresh' >/dev/null
-  assert_file_contains "$lite_path" "fresh"
-  assert_file_not_contains "$lite_path" "stale"
-
-  agent_adapter_workspace_install_skills >/dev/null
-  agent_adapter_workspace_write_managed_skills >/dev/null
-  assert_file_contains "$adapter_dir/skills/agent-check/SKILL.md" "team-owned-skill"
-  assert_file_contains "$inventory_path" "agent-context-pack"
-  assert_file_contains "$inventory_path" "agent-check"
-  assert_file_contains "$inventory_path" "agent-release"
-  assert_file_not_contains "$inventory_path" "../invalid"
-  if [[ "$(grep -Fxc 'agent-context-pack' "$inventory_path")" -ne 1 ]]; then
-    printf 'Expected managed skill inventory to be de-duplicated.\n' >&2
-    exit 1
-  fi
-
-  printf 'user-ignore\n' >> "$ignore_path"
-  agent_adapter_workspace_ensure_ignore_block \
-    "$ignore_path" \
-    "# Agent Rails test adapter" \
-    "# Agent Rails test adapter end" \
-    ".adapter/AGENT_RAILS.md" \
-    ".adapter/skills/agent-*/" >/dev/null
-  agent_adapter_workspace_ensure_ignore_block \
-    "$ignore_path" \
-    "# Agent Rails test adapter" \
-    "# Agent Rails test adapter end" \
-    ".adapter/AGENT_RAILS.md" \
-    ".adapter/skills/agent-*/" >/dev/null
-  assert_file_contains "$ignore_path" "user-ignore"
-  if [[ "$(grep -Fxc '# Agent Rails test adapter' "$ignore_path")" -ne 1 ]]; then
-    printf 'Expected local ignore block to be idempotent.\n' >&2
-    exit 1
-  fi
-
-  agent_adapter_workspace_remove_generated_file "$lite_path" >/dev/null
-  agent_adapter_workspace_remove_managed_skills >/dev/null
-  agent_adapter_workspace_remove_managed_skills_file >/dev/null
-  agent_adapter_workspace_remove_ignore_block \
-    "$ignore_path" \
-    "# Agent Rails test adapter" \
-    "# Agent Rails test adapter end" \
-    "Would remove test ignore block from" \
-    "Removed test ignore block from" \
-    ".adapter/AGENT_RAILS.md" \
-    ".adapter/skills/agent-*/" >/dev/null
-  assert_file_not_exists "$lite_path"
-  assert_file_not_exists "$adapter_dir/skills/agent-context-pack"
-  assert_file_contains "$adapter_dir/skills/agent-check/SKILL.md" "team-owned-skill"
-  assert_file_not_exists "$inventory_path"
-  assert_file_contains "$ignore_path" "user-ignore"
-  assert_file_not_contains "$ignore_path" "# Agent Rails test adapter"
-}
-
 test_adapter_content_module_contract() {
+  local cli="$ROOT_DIR/scripts/agent-python-cli.py"
   local error_output_path="$TMP_ROOT/adapter-content-error.txt"
+  local stdout_path="$TMP_ROOT/adapter-content-stdout.txt"
   local output status
 
-  # shellcheck source=scripts/agent-adapter-content.sh
-  source "$ROOT_DIR/scripts/agent-adapter-content.sh"
-
-  agent_adapter_content_init claude "9.9.9" "/kit/bin/agent-rails" "/profiles/demo.profile"
-  output="$(agent_adapter_content_render guide)"
+  output="$(python3 -E "$cli" adapter-content \
+    --adapter claude --artifact guide --version 9.9.9 \
+    --bin /kit/bin/agent-rails --profile /profiles/demo.profile)"
   assert_contains "$output" "# Agent Rails"
   assert_contains "$output" "Agent Rails Version: 9.9.9"
   assert_contains "$output" '/kit/bin/agent-rails pack'
   assert_contains "$output" '--profile "/profiles/demo.profile"'
 
-  output="$(agent_adapter_content_render pack)"
+  output="$(python3 -E "$cli" adapter-content \
+    --adapter claude --artifact pack --version 9.9.9 \
+    --bin /kit/bin/agent-rails --profile /profiles/demo.profile)"
   assert_contains "$output" "argument-hint: [goal]"
   assert_not_contains "$output" "agent: build"
   assert_contains "$output" '$ARGUMENTS'
 
-  agent_adapter_content_init opencode "9.9.9" "/kit/bin/agent-rails" "/profiles/demo.profile"
-  output="$(agent_adapter_content_render guide)"
+  output="$(python3 -E "$cli" adapter-content \
+    --adapter opencode --artifact guide --version 9.9.9 \
+    --bin /kit/bin/agent-rails --profile /profiles/demo.profile)"
   assert_contains "$output" "local opencode adapter"
-  output="$(agent_adapter_content_render check)"
+  output="$(python3 -E "$cli" adapter-content \
+    --adapter opencode --artifact check --version 9.9.9 \
+    --bin /kit/bin/agent-rails --profile /profiles/demo.profile)"
   assert_contains "$output" "agent: build"
   assert_not_contains "$output" "argument-hint:"
   assert_contains "$output" "AGENT RAILS: CHECK-ONLY"
 
   set +e
-  output="$(agent_adapter_content_render unknown 2>&1)"
+  python3 -E "$cli" adapter-content \
+    --adapter claude --artifact unknown --version 9.9.9 \
+    --bin /kit/bin/agent-rails > "$stdout_path" 2> "$error_output_path"
   status=$?
   set -e
   if [[ "$status" -ne 2 ]]; then
-    printf 'Expected unknown adapter artifact to exit 2.\n%s\n' "$output" >&2
+    printf 'Expected unknown adapter artifact to exit 2.\n' >&2
     exit 1
   fi
-  assert_contains "$output" "Unknown Agent Rails adapter artifact"
+  if [[ -s "$stdout_path" ]]; then
+    printf 'Expected invalid adapter artifact to keep stdout empty.\n' >&2
+    return 1
+  fi
 
   set +e
-  agent_adapter_content_init unknown "9.9.9" "/kit/bin/agent-rails" "/profiles/demo.profile" \
-    > "$error_output_path" 2>&1
+  python3 -E "$cli" adapter-content \
+    --adapter unknown --artifact guide --version 9.9.9 \
+    --bin /kit/bin/agent-rails > "$stdout_path" 2> "$error_output_path"
   status=$?
   set -e
-  output="$(< "$error_output_path")"
   if [[ "$status" -ne 2 ]]; then
-    printf 'Expected unknown adapter content type to exit 2.\n%s\n' "$output" >&2
+    printf 'Expected unknown adapter content type to exit 2.\n' >&2
     exit 1
   fi
-  assert_contains "$output" "Unknown Agent Rails adapter content type"
+  if [[ -s "$stdout_path" ]]; then
+    printf 'Expected invalid adapter type to keep stdout empty.\n' >&2
+    return 1
+  fi
 
   set +e
-  output="$(agent_adapter_content_render guide 2>&1)"
+  python3 -E "$cli" adapter-content \
+    --adapter claude --artifact guide --version 9.9.9 --bin '' \
+    > "$stdout_path" 2> "$error_output_path"
   status=$?
   set -e
   if [[ "$status" -ne 2 ]]; then
-    printf 'Expected render after failed initialization to exit 2.\n%s\n' "$output" >&2
+    printf 'Expected empty Adapter Content executable to exit 2.\n' >&2
     exit 1
   fi
-  assert_contains "$output" "not initialized"
+  assert_file_contains "$error_output_path" "executable is empty"
+}
+
+test_python_adapter_content_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_adapter_content.py"
+}
+
+test_python_adapter_workspace_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_adapter_workspace.py"
+}
+
+test_python_opencode_adapter_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_opencode_adapter.py"
+}
+
+test_python_claude_adapter_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_claude_adapter.py"
+}
+
+test_python_doctor_application_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_doctor_application.py"
 }
 
 test_adapter_install_preserves_unmanaged_generated_paths() {
@@ -371,7 +293,7 @@ test_adapter_install_preserves_unmanaged_generated_paths() {
   assert_file_contains "$claude_repo/.claude/skills/agent-context-pack/SKILL.md" "user-owned-claude-skill"
 }
 
-test_opencode_migrates_legacy_adapter_to_managed_inventory() {
+test_opencode_preserves_legacy_unowned_skill_without_inventory_claim() {
   local repo="$TMP_ROOT/opencode-legacy-inventory"
   mkdir -p "$repo/.opencode/skills/agent-context-pack" "$repo/.opencode/skills/agent-custom"
   git -C "$repo" init -q
@@ -387,12 +309,70 @@ test_opencode_migrates_legacy_adapter_to_managed_inventory() {
   git_commit "$repo" init
 
   "$AGENT_RAILS_BIN" opencode install --project "$repo" >/dev/null
-  assert_file_contains "$repo/.opencode/.agent-rails-managed-skills" "agent-context-pack"
-  assert_file_not_contains "$repo/.opencode/skills/agent-context-pack/SKILL.md" "legacy-managed-skill"
+  assert_file_not_contains "$repo/.opencode/.agent-rails-managed-skills" '"name": "agent-context-pack"'
+  assert_file_contains "$repo/.opencode/skills/agent-context-pack/SKILL.md" "legacy-managed-skill"
 
   "$AGENT_RAILS_BIN" opencode uninstall --project "$repo" >/dev/null
-  assert_file_not_exists "$repo/.opencode/skills/agent-context-pack"
+  assert_file_contains "$repo/.opencode/skills/agent-context-pack/SKILL.md" "legacy-managed-skill"
   assert_file_contains "$repo/.opencode/skills/agent-custom/SKILL.md" "legacy-user-skill"
+}
+
+test_opencode_uses_python_target_context_once() {
+  local repo="$TMP_ROOT/opencode-python-target-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/opencode-python-target-context.profile"
+  local missing_profile="$TMP_ROOT/opencode-python-target-context-missing.profile"
+  local profile_count="$TMP_ROOT/opencode-python-target-context-profile-count"
+  local task_pack="$TMP_ROOT/opencode-python-target-context-pack.md"
+  local shadow_marker="$TMP_ROOT/opencode-python-target-context-shadow-marker"
+  local plugin_path output status
+  mkdir -p "$nested"
+  repo="$(cd "$repo" && pwd -P)"
+  nested="$repo/nested/path"
+  git -C "$repo" init -q
+  printf '# OpenCode Python Target Project Context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'count=0\n'
+    printf '[[ ! -f "%s" ]] || count="$(cat "%s")"\n' "$profile_count" "$profile_count"
+    printf 'printf "%%s\\n" "$((count + 1))" > "%s"\n' "$profile_count"
+    printf 'TASK_PACK_PATH="%s"\n' "$task_pack"
+    printf 'AGENT_RAILS_TOKENIZER="command"\n'
+    printf 'AGENT_RAILS_TOKENIZER_CMD="printf 17"\n'
+    printf 'AGENT_RAILS_OPENCODE_CONTEXT_PERCENT="31"\n'
+    printf 'AGENT_RAILS_OPENCODE_HOOK_TIMEOUT_MS="17000"\n'
+  } > "$profile"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" opencode install \
+        --project "$nested" \
+        --profile "$profile" \
+        --mode local)"
+  plugin_path="$repo/.opencode/plugins/agent-rails.mjs"
+
+  assert_contains "$output" "Project: $repo"
+  assert_contains "$output" "Task Pack: $task_pack"
+  assert_file_contains "$plugin_path" '"tokenizer": "command"'
+  assert_file_contains "$plugin_path" '"tokenizerCommand": "printf 17"'
+  assert_file_contains "$plugin_path" '"contextPercent": 31'
+  assert_file_contains "$plugin_path" '"hookTimeoutMs": 17000'
+  [[ "$(cat "$profile_count")" -eq 1 ]]
+  assert_file_not_exists "$shadow_marker"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" opencode install \
+    --project "$repo" \
+    --profile "$missing_profile" \
+    --dry-run 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Profile not found: $missing_profile"
 }
 
 test_claude_force_replaces_existing_block() {
@@ -596,6 +576,11 @@ test_claude_local_can_install_session_hook() {
   assert_file_not_contains "$home/.claude/settings.json" "agent-rails-session-start.sh"
 }
 
+test_python_session_start_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/tests/test_session_start.py"
+}
+
 test_session_start_hook_respects_project_marker() {
   local repo="$TMP_ROOT/session-hook-marker"
   local plain_repo="$TMP_ROOT/session-hook-plain"
@@ -654,6 +639,51 @@ EOF
 
   assert_contains "$output" "--profile \"$profile\""
   assert_not_contains "$output" "$ROOT_DIR/profiles/default.profile"
+}
+
+test_session_start_hook_round_trips_shell_active_profile() {
+  local repo="$TMP_ROOT/session-hook-special-profile"
+  local profile="$TMP_ROOT/profile-\"; printf PWNED; \$-\\.profile"
+  local output
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf 'source "$AGENT_RAILS_HOME/profiles/default.profile"\n' > "$profile"
+
+  "$AGENT_RAILS_BIN" claude install \
+    --project "$repo" --profile "$profile" --mode local >/dev/null
+  assert_file_contains "$repo/CLAUDE.local.md" "agent-rails:profile-b64:"
+
+  output="$(CLAUDE_PROJECT_DIR="$repo" "$ROOT_DIR/hooks/agent-rails-session-start.sh")"
+
+  assert_contains "$output" "--profile '$profile'"
+  assert_not_contains "$output" '--profile "'"$profile"'"'
+}
+
+test_session_start_hook_rejects_corrupt_profile_metadata() {
+  local repo="$TMP_ROOT/session-hook-corrupt-profile"
+  local output status
+  mkdir -p "$repo/.claude"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  cat > "$repo/.claude/AGENT_RAILS.md" <<EOF
+<!-- agent-rails:generated -->
+<!-- agent-rails:profile-b64: -->
+Visible session marker protocol
+$AGENT_RAILS_BIN pack --project "\$project_root" --profile "$ROOT_DIR/profiles/default.profile" "<goal>"
+EOF
+
+  status=0
+  output="$(CLAUDE_PROJECT_DIR="$repo" \
+    "$ROOT_DIR/hooks/agent-rails-session-start.sh" 2>&1)" || status=$?
+
+  [[ "$status" -ne 0 ]]
+  assert_not_contains "$output" "$ROOT_DIR/profiles/default.profile"
+  assert_not_contains "$output" "AGENT RAILS SESSION HOOK ACTIVE"
 }
 
 test_session_start_hook_resolves_missing_legacy_kit_profile() {
@@ -755,7 +785,7 @@ test_claude_local_allows_tracked_project_claude_files() {
   fi
 }
 
-test_claude_local_refreshes_legacy_ignore_block() {
+test_claude_local_refreshes_broad_ignore_block() {
   local repo="$TMP_ROOT/local-refresh-ignore"
   local exclude_path
   mkdir -p "$repo"
@@ -772,6 +802,7 @@ test_claude_local_refreshes_legacy_ignore_block() {
     printf '# Agent Rails local adapter\n'
     printf '.claude/\n'
     printf 'CLAUDE.md\n'
+    printf '# Agent Rails local adapter end\n'
   } >> "$exclude_path"
 
   "$AGENT_RAILS_BIN" claude install --project "$repo" --mode local >/dev/null
@@ -796,6 +827,64 @@ test_doctor_reports_missing_adapter_as_warning() {
   assert_contains "$output" "Claude Adapter"
   assert_contains "$output" "CLAUDE.local.md/CLAUDE.md Agent Rails block is missing"
   assert_contains "$output" "Doctor status: OK with warnings"
+}
+
+test_claude_install_uses_python_target_context_once() {
+  local repo="$TMP_ROOT/claude-python-target-context"
+  local nested="$repo/nested/path"
+  local profile="$TMP_ROOT/claude-python-target-context.profile"
+  local missing_profile="$TMP_ROOT/claude-python-target-context-missing.profile"
+  local profile_count="$TMP_ROOT/claude-python-target-context-profile-count"
+  local task_pack="$TMP_ROOT/claude-python-target-context-pack.md"
+  local claude_user_md="$TMP_ROOT/claude-python-target-context-CLAUDE.md"
+  local claude_settings="$TMP_ROOT/claude-python-target-context-settings.json"
+  local shadow_marker="$TMP_ROOT/claude-python-target-context-shadow-marker"
+  local output status
+  mkdir -p "$nested"
+  repo="$(cd "$repo" && pwd -P)"
+  nested="$repo/nested/path"
+  git -C "$repo" init -q
+  printf '# Claude Python Target Project Context\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  install_target_python_shadow_package "$repo"
+  {
+    printf 'source "%s/profiles/default.profile"\n' "$ROOT_DIR"
+    printf 'count=0\n'
+    printf '[[ ! -f "%s" ]] || count="$(cat "%s")"\n' "$profile_count" "$profile_count"
+    printf 'printf "%%s\\n" "$((count + 1))" > "%s"\n' "$profile_count"
+    printf 'TASK_PACK_PATH="%s"\n' "$task_pack"
+    printf 'AGENT_RAILS_CLAUDE_USER_MD="%s"\n' "$claude_user_md"
+    printf 'AGENT_RAILS_CLAUDE_SETTINGS="%s"\n' "$claude_settings"
+  } > "$profile"
+
+  output="$(cd "$repo" && \
+    PYTHONPATH=. \
+    AGENT_RAILS_SHADOW_MARKER="$shadow_marker" \
+      "$AGENT_RAILS_BIN" claude install \
+        --project "$nested" \
+        --profile "$profile" \
+        --mode local \
+        --global-reminder \
+        --session-hook \
+        --dry-run)"
+
+  assert_contains "$output" "Project: $repo"
+  assert_contains "$output" "Task Pack: $task_pack"
+  assert_contains "$output" "Global Reminder: $claude_user_md"
+  assert_contains "$output" "Session Hook: $claude_settings"
+  [[ "$(cat "$profile_count")" -eq 1 ]]
+  assert_file_not_exists "$shadow_marker"
+
+  set +e
+  output="$("$AGENT_RAILS_BIN" claude install \
+    --project "$repo" \
+    --profile "$missing_profile" \
+    --dry-run 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 2 ]]
+  assert_contains "$output" "Profile not found: $missing_profile"
 }
 
 test_doctor_ok_after_local_install() {
@@ -892,8 +981,6 @@ test_doctor_uses_python_target_context_without_reloading_profile() {
   assert_contains "$output" "Task Pack path: $task_pack"
   [[ "$(cat "$profile_count")" == "1" ]]
   [[ "$(cat "$env_count")" == "1" ]]
-  assert_file_contains "$ROOT_DIR/scripts/agent-doctor.sh" "scripts/agent-python-cli.py"
-  assert_file_not_contains "$ROOT_DIR/scripts/agent-doctor.sh" "agent_target_project_"
 }
 
 test_doctor_preserves_missing_profile_failure_contract() {
@@ -1019,10 +1106,15 @@ run_adapter_foundation_tests() {
   run_test test_opencode_install_doctor_and_uninstall "opencode install/doctor/uninstall"
   run_test test_opencode_plugin_migrates_legacy_config_and_preserves_user_entries "opencode plugin migrates legacy config"
   run_test test_opencode_can_promote_local_adapter_to_project_mode "opencode promotes local adapter to project mode"
-  run_test test_managed_adapter_workspace_module_contract "managed adapter workspace module contract"
   run_test test_adapter_content_module_contract "shared adapter content module contract"
+  run_test test_python_adapter_content_module "Python Adapter Content module"
+  run_test test_python_adapter_workspace_module "Python Managed Adapter Workspace module"
+  run_test test_python_opencode_adapter_module "Python OpenCode Adapter Application"
+  run_test test_python_claude_adapter_module "Python Claude Adapter Application"
+  run_test test_python_doctor_application_module "Python Doctor Application Service"
   run_test test_adapter_install_preserves_unmanaged_generated_paths "adapter install preserves unmanaged generated paths"
-  run_test test_opencode_migrates_legacy_adapter_to_managed_inventory "opencode migrates legacy adapter inventory"
+  run_test test_opencode_preserves_legacy_unowned_skill_without_inventory_claim "opencode preserves legacy unowned skill"
+  run_test test_opencode_uses_python_target_context_once "OpenCode uses Python Target Project Context once"
 }
 
 run_adapter_claude_tests() {
@@ -1034,14 +1126,18 @@ run_adapter_claude_tests() {
   run_test test_claude_local_does_not_touch_tracked_claude_md "claude local leaves tracked CLAUDE.md alone"
   run_test test_claude_local_can_write_global_reminder "claude local can write global reminder"
   run_test test_claude_local_can_install_session_hook "claude local can install session hook"
+  run_test test_python_session_start_module "Python SessionStart Application"
   run_test test_session_start_hook_respects_project_marker "session start hook respects project marker"
   run_test test_session_start_hook_prefers_local_marker_profile "session start hook prefers local marker profile"
+  run_test test_session_start_hook_round_trips_shell_active_profile "session start hook safely round-trips special Profile paths"
+  run_test test_session_start_hook_rejects_corrupt_profile_metadata "session start hook rejects corrupt Profile metadata"
   run_test test_session_start_hook_resolves_missing_legacy_kit_profile "session start hook resolves missing legacy kit profile"
   run_test test_session_start_hook_outputs_codex_json "session start hook outputs Codex JSON"
   run_test test_session_start_hook_reads_opencode_marker_profile "session start hook reads opencode marker profile"
   run_test test_claude_local_allows_tracked_project_claude_files "claude local allows tracked project Claude files"
-  run_test test_claude_local_refreshes_legacy_ignore_block "claude local refreshes legacy ignore block"
+  run_test test_claude_local_refreshes_broad_ignore_block "claude local refreshes broad ignore block"
   run_test test_doctor_reports_missing_adapter_as_warning "doctor reports missing adapter as warning"
+  run_test test_claude_install_uses_python_target_context_once "Claude install uses Python Target Project Context once"
   run_test test_doctor_ok_after_local_install "doctor ok after local install"
   run_test test_doctor_fix_refreshes_stale_adapter_version "doctor --fix refreshes stale adapter version"
   run_test test_doctor_uses_python_target_context_without_reloading_profile "doctor uses Python Target Project Context once"

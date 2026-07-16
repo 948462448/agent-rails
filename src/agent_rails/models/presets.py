@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import shlex
 from typing import Mapping, Optional
 
 
@@ -132,10 +131,6 @@ def shell_values(model: str) -> Mapping[str, str]:
             }
         )
     return values
-
-
-def render_shell_values(model: str) -> str:
-    return "\n".join(f"{name}={shlex.quote(value)}" for name, value in shell_values(model).items())
 
 
 def _optional_int(value: Optional[int]) -> str:

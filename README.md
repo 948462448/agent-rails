@@ -14,7 +14,7 @@ Agent Rails 是一套个人本地护栏，支持 Claude Code、Codex 和 OpenCod
 
 ## 五分钟开始
 
-准备条件：本机已有 Git、Bash，以及 Claude Code、Codex 或 OpenCode 中的至少一个。Claude 的启动 Hook 还需要 Python 3。
+准备条件：本机已有 Git、Bash、Python 3.9+，以及 Claude Code、Codex 或 OpenCode 中的至少一个。
 
 ### 1. 安装 CLI（不需要 clone）
 
@@ -23,7 +23,9 @@ Agent Rails 是一套个人本地护栏，支持 Claude Code、Codex 和 OpenCod
 ```bash
 curl -fsSL https://github.com/948462448/agent-rails/releases/latest/download/install.sh \
   -o /tmp/agent-rails-install.sh
-less /tmp/agent-rails-install.sh
+curl -fsSL https://github.com/948462448/agent-rails/releases/latest/download/release_install.py \
+  -o /tmp/release_install.py
+less /tmp/agent-rails-install.sh /tmp/release_install.py
 bash /tmp/agent-rails-install.sh
 "$HOME/.local/bin/agent-rails" init
 ```

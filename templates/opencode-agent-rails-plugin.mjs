@@ -122,6 +122,7 @@ class ContextAssembler {
   start() {
     if (this.child) return
     const args = [
+      "-I",
       resolveAssembler(),
       "--serve",
       "--tokenizer", CONFIG.tokenizer,

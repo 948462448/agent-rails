@@ -24,6 +24,25 @@ from agent_rails.memory.online import (
 
 
 class OnlineMemoryAdapterTest(unittest.TestCase):
+    def test_adapter_runs_in_explicit_target_project_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-online-memory-") as temp_dir:
+            working_directory = Path(temp_dir) / "project"
+            working_directory.mkdir()
+            query_file = Path(temp_dir) / "query.md"
+            query_file.write_text("query\n", encoding="utf-8")
+
+            output = query_online_memory(
+                "pwd -P",
+                OnlineMemoryQuery(
+                    query_file,
+                    "sample-project",
+                    1,
+                    working_directory=working_directory,
+                ),
+            )
+
+            self.assertEqual(output, f"{working_directory.resolve()}\n")
+
     def test_command_receives_provider_neutral_query_contract(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-online-memory-") as temp_dir:
             query_file = Path(temp_dir) / "query.md"

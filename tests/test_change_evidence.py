@@ -22,6 +22,7 @@ from agent_rails.context.change_evidence import (
     collect_change_evidence,
     markdown_code,
     render_change_sections,
+    select_goal_tokens,
     write_change_evidence_bundle,
 )
 
@@ -100,6 +101,112 @@ class ChangeEvidenceTest(unittest.TestCase):
                 ranked["scripts/延迟.py"].reasons[:2],
                 ("change:latency", "change:regression"),
             )
+
+    def test_clean_worktree_collects_goal_symbols_and_related_tests(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-task-code-") as temp_dir:
+            repo = self.make_repo(Path(temp_dir))
+            (repo / "src").mkdir()
+            (repo / "tests").mkdir()
+            (repo / "src" / "session_validator.py").write_text(
+                "class SessionValidator:\n"
+                "    def validate_cookie(self, cookie: str) -> bool:\n"
+                "        return bool(cookie)\n",
+                encoding="utf-8",
+            )
+            (repo / "src" / "reporting.py").write_text(
+                "def render_report() -> str:\n"
+                "    return 'ok'\n",
+                encoding="utf-8",
+            )
+            (repo / "tests" / "test_session_validator.py").write_text(
+                "from src.session_validator import SessionValidator\n\n"
+                "def test_validate_cookie() -> None:\n"
+                "    assert SessionValidator().validate_cookie('session-cookie')\n",
+                encoding="utf-8",
+            )
+            self.commit_all(repo, "base")
+
+            request = self.request(
+                repo,
+                goal="fix session cookie validation",
+            )
+            evidence = collect_change_evidence(request)
+            rendered = render_change_sections(evidence, request)
+            records = {record.path: record for record in evidence.task_code_records}
+
+            self.assertEqual(evidence.changed_paths, ())
+            self.assertIn("src/session_validator.py", records)
+            self.assertIn("tests/test_session_validator.py", records)
+            self.assertEqual(
+                records["src/session_validator.py"].symbol,
+                "SessionValidator",
+            )
+            self.assertGreater(
+                records["src/session_validator.py"].score,
+                records["tests/test_session_validator.py"].score,
+            )
+            self.assertIn("## Task Code Evidence", rendered)
+            self.assertIn("`src/session_validator.py:1`", rendered)
+            self.assertIn("symbol=`SessionValidator`", rendered)
+            self.assertNotIn("src/reporting.py", rendered)
+
+    def test_goal_tokens_keep_searchable_chinese_terms(self) -> None:
+        tokens = select_goal_tokens("修复登录校验并减少无关代码", "fixture")
+
+        self.assertIn("登录", tokens)
+        self.assertIn("校验", tokens)
+        self.assertNotIn("代码", tokens)
+
+    def test_clean_explicit_target_uses_commit_and_omits_worktree_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-task-target-") as temp_dir:
+            repo = self.make_repo(Path(temp_dir))
+            (repo / "session.py").write_text(
+                "class SessionCookie:\n"
+                "    pass\n",
+                encoding="utf-8",
+            )
+            self.commit_all(repo, "base")
+            (repo / "workspace_session.py").write_text(
+                "class WorkspaceSessionCookie:\n"
+                "    pass\n",
+                encoding="utf-8",
+            )
+
+            evidence = collect_change_evidence(
+                self.request(
+                    repo,
+                    goal="session cookie",
+                    explicit=True,
+                    base="HEAD",
+                )
+            )
+
+            self.assertEqual(evidence.changed_paths, ())
+            self.assertEqual(
+                [record.path for record in evidence.task_code_records],
+                ["session.py"],
+            )
+
+    def test_task_code_evidence_does_not_render_matching_source_body(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-task-safe-") as temp_dir:
+            repo = self.make_repo(Path(temp_dir))
+            (repo / "credential.py").write_text(
+                "SERVICE_ACCESS_KEY='must-not-enter-task-pack'\n"
+                "def load_credential() -> str:\n"
+                "    return SERVICE_ACCESS_KEY\n",
+                encoding="utf-8",
+            )
+            self.commit_all(repo, "base")
+
+            request = self.request(repo, goal="credential loader")
+            rendered = render_change_sections(
+                collect_change_evidence(request),
+                request,
+            )
+
+            self.assertIn("credential.py", rendered)
+            self.assertIn("load_credential", rendered)
+            self.assertNotIn("must-not-enter-task-pack", rendered)
 
     def test_inherited_git_context_leading_dash_and_symlink_stay_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-change-safety-") as temp_dir:

@@ -37,6 +37,7 @@ class PackRendererTest(unittest.TestCase):
                 "## Changed Files\n\n- `src/app.py`\n\n"
                 "## Changed File Priority\n\n- `src/app.py`\n\n"
                 "## Changed File Excerpts\n\n- None.\n\n"
+                "## Task Code Evidence\n\n- None.\n\n"
                 "## Working Tree Status\n\n- clean\n\n"
             ),
             project_docs_entry=(
@@ -97,6 +98,7 @@ class PackRendererTest(unittest.TestCase):
             "Changed Files",
             "Changed File Priority",
             "Changed File Excerpts",
+            "Task Code Evidence",
             "Working Tree Status",
             "Relevant Entry Docs",
             "Context Gaps",

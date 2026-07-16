@@ -171,4 +171,5 @@ Daily use ends here. Updating, uninstalling, custom models, context budgets, Pro
 - [Agent Rails 工作原理](./docs/how-agent-rails-works.zh-CN.md)
 - [Design and Safety Boundaries](./docs/local-adapters-and-release-safety.md)
 - [GitHub Release Distribution](./docs/github-release-distribution.md)
+- [Coding Agent Evolution and GitHub Research (Chinese)](./docs/coding-agent-evolution.zh-CN.md)
 - [Changelog](./CHANGELOG.md)

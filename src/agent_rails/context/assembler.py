@@ -29,6 +29,7 @@ SECTION_RULES = {
     "Changed Files": ("git", 70, 0),
     "Changed File Priority": ("git", 85, 0),
     "Changed File Excerpts": ("git", 100, 0),
+    "Task Code Evidence": ("git", 95, 0),
     "Working Tree Status": ("git", 90, 0),
     "Relevant Entry Docs": ("git", 75, 0),
     "Context Gaps": ("git", 65, 0),

@@ -47,6 +47,10 @@ Describe the concrete user goal here.
 
 - No changed text file excerpts selected.
 
+## Task Code Evidence
+
+- No task-relevant tracked code evidence matched the goal.
+
 ## Working Tree Status
 
 ```text

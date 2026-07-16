@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Started the developer-first coding-agent roadmap with bounded Task Code Evidence: a clean Target Project snapshot can now use literal Goal terms to select relevant tracked files, lightweight symbols, and tests without adding a public command, third-party dependency, or source-body expansion.
+- Added a durable coding-agent evolution document that records the GitHub research, product boundary, retrieval/repair/decomposition/model-routing roadmap, Memory role, non-goals, and paired evaluation gates.
+
 ## 0.6.1 - 2026-07-16
 
 - Started the Shell-to-Python migration with a standard-library `src/agent_rails` package: `agent-rails estimate` now runs through Python Model Preset, Tokenizer, and rendering Modules while its Compatibility Shell only loads the existing Profile and forwards arguments.

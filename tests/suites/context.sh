@@ -394,6 +394,35 @@ test_pack_includes_changed_file_excerpts() {
   assert_file_contains "$output" "agent rails excerpt fixture"
 }
 
+test_clean_pack_includes_task_code_evidence() {
+  local repo="$TMP_ROOT/pack-task-code-evidence"
+  local output="$TMP_ROOT/pack-task-code-evidence.md"
+  mkdir -p "$repo/src" "$repo/tests"
+  git -C "$repo" init -q
+  {
+    printf 'class SessionValidator:\n'
+    printf '    def validate_cookie(self, cookie: str) -> bool:\n'
+    printf '        return bool(cookie)\n'
+  } > "$repo/src/session_validator.py"
+  {
+    printf 'from src.session_validator import SessionValidator\n\n'
+    printf 'def test_validate_cookie() -> None:\n'
+    printf '    assert SessionValidator().validate_cookie("session-cookie")\n'
+  } > "$repo/tests/test_session_validator.py"
+  printf 'def render_report():\n    return "ok"\n' > "$repo/src/reporting.py"
+  git -C "$repo" add src tests
+  git_commit "$repo" init
+
+  "$AGENT_RAILS_BIN" pack --project "$repo" --output "$output" --pack-mode lite \
+    "fix session cookie validation" >/dev/null
+
+  assert_file_contains "$output" "## Task Code Evidence"
+  assert_file_contains "$output" '`src/session_validator.py:1`'
+  assert_file_contains "$output" 'symbol=`SessionValidator`'
+  assert_file_contains "$output" '`tests/test_session_validator.py:3`'
+  assert_file_not_contains "$output" "src/reporting.py"
+}
+
 test_pack_excerpts_prioritize_changed_hunks() {
   local repo="$TMP_ROOT/pack-diff-excerpts"
   local output="$TMP_ROOT/pack-diff-excerpts-task-pack.md"
@@ -1388,6 +1417,7 @@ run_context_tests() {
   run_test test_memory_suggest_write_local_card "memory suggest writes local card"
   run_test test_memory_suggest_uses_python_target_context_once "memory suggest uses Python Target Project Context once"
   run_test test_pack_includes_changed_file_excerpts "pack includes changed file excerpts"
+  run_test test_clean_pack_includes_task_code_evidence "clean pack includes task code evidence"
   run_test test_pack_excerpts_prioritize_changed_hunks "pack excerpts prioritize changed hunks"
   run_test test_pack_redacts_sensitive_changed_hunks "pack redacts sensitive changed hunks"
   run_test test_pack_truncation_preserves_utf8 "pack truncation preserves UTF-8"

@@ -29,7 +29,7 @@ Usage: bash tests/run.sh [core|adapters|workflows|context ...]
        bash tests/run.sh --related [PATH ...]
        bash tests/run.sh --list-related [PATH ...]
 
-With no suite names, runs all 172 tests in their historical order.
+With no suite names, runs all 173 tests in their historical order.
 Related mode maps explicit paths, or current Git changes when no paths are
 given, to the smallest safe set of module suites.
 USAGE

@@ -13,15 +13,15 @@ import shutil
 import stat
 import subprocess
 from typing import Mapping, Optional, Tuple, Union
-import unicodedata
 
 from agent_rails.config.target_project import (
     TargetProjectContext,
-    resolve_project_root_identity,
+    TargetProjectContextMismatch,
+    TargetProjectError,
     resolve_target_project,
+    validate_target_project_context,
 )
-from agent_rails.core.paths import AgentRailsPaths, canonical_path
-from agent_rails.git._runner import run_git
+from agent_rails.core.terminal import terminal_literal as _terminal_literal
 
 from .content import (
     AdapterArtifact,
@@ -30,10 +30,20 @@ from .content import (
     AdapterType,
     render_adapter_content,
 )
+from .events import (
+    AdapterError,
+    AdapterEvent as OpenCodeEvent,
+    AdapterEventStream as OpenCodeEventStream,
+    AdapterOutput,
+    append_stdout as _stdout,
+    append_stdout_many as _stdout_many,
+    sanitize_events as _sanitize_events,
+)
 from .workspace import (
     ManagedAdapterWorkspace,
     ManagedAdapterWorkspaceConfig,
     ManagedAdapterWorkspaceError,
+    resolve_local_ignore_path,
 )
 
 
@@ -71,27 +81,8 @@ _DEFAULT_SCHEMA = "https://opencode.ai/config.json"
 _STATE_FORMAT = "agent-rails-opencode-state-v1"
 
 
-class OpenCodeAdapterError(RuntimeError):
+class OpenCodeAdapterError(AdapterError):
     """The OpenCode adapter request could not be completed."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        exit_code: int = 1,
-        events: Tuple["OpenCodeEvent", ...] = (),
-    ) -> None:
-        super().__init__(_terminal_literal(message))
-        self.exit_code = exit_code
-        self.events = _sanitize_events(events)
-
-    @property
-    def stdout(self) -> str:
-        return _render_event_stream(self.events, OpenCodeEventStream.STDOUT)
-
-    @property
-    def stderr(self) -> str:
-        return _render_event_stream(self.events, OpenCodeEventStream.STDERR)
 
 
 class OpenCodeAdapterInputError(OpenCodeAdapterError):
@@ -114,11 +105,6 @@ class OpenCodeAction(str, Enum):
 class OpenCodeInstallMode(str, Enum):
     LOCAL = "local"
     PROJECT = "project"
-
-
-class OpenCodeEventStream(str, Enum):
-    STDOUT = "stdout"
-    STDERR = "stderr"
 
 
 @dataclass(frozen=True)
@@ -158,28 +144,13 @@ OpenCodeAdapterRequest = Union[
 
 
 @dataclass(frozen=True)
-class OpenCodeEvent:
-    stream: OpenCodeEventStream
-    text: str
-
-
-@dataclass(frozen=True)
-class OpenCodeAdapterResult:
+class OpenCodeAdapterResult(AdapterOutput):
     action: OpenCodeAction
     project_root: Path
     profile_path: str
     task_pack_path: str
     mode: OpenCodeInstallMode
     events: Tuple[OpenCodeEvent, ...]
-
-    @property
-    def stdout(self) -> str:
-        return _render_event_stream(self.events, OpenCodeEventStream.STDOUT)
-
-    @property
-    def stderr(self) -> str:
-        return _render_event_stream(self.events, OpenCodeEventStream.STDERR)
-
 
 @dataclass(frozen=True)
 class _OpenCodeLayout:
@@ -253,9 +224,9 @@ def run_opencode_adapter(
             environment=environment,
         )
     version = _resolve_version(kit_home, environment)
-    layout = _build_layout(context, kit_home, environment)
     events = []  # type: list[OpenCodeEvent]
     try:
+        layout = _build_layout(context, kit_home, environment)
         workspace = ManagedAdapterWorkspace(
             ManagedAdapterWorkspaceConfig(
                 home=kit_home,
@@ -376,55 +347,18 @@ def _validate_pre_resolved_context(
 ) -> None:
     """Reject a context that was resolved for a different invocation."""
 
-    if not isinstance(context, TargetProjectContext):
-        raise OpenCodeAdapterInputError(
-            "OpenCode adapter context must be a TargetProjectContext."
+    try:
+        validate_target_project_context(
+            context,
+            requested_project=requested_project,
+            kit_home=kit_home,
+            explicit_profile=explicit_profile,
+            environment=environment,
         )
-    if not isinstance(context.root, Path) or not isinstance(
-        context.profile_path, str
-    ):
-        raise OpenCodeAdapterInputError(
-            "OpenCode adapter context has invalid project or Profile fields."
-        )
-    if not requested_project.is_dir():
-        raise OpenCodeAdapterInputError(
-            f"Project directory not found: {requested_project}"
-        )
-    requested_root, _ = resolve_project_root_identity(
-        requested_project, environment
-    )
-    if canonical_path(context.root) != requested_root:
-        raise OpenCodeAdapterInputError(
-            "OpenCode adapter context does not match the requested project."
-        )
-    expected_profile = AgentRailsPaths.from_environment(
-        kit_home, environment
-    ).resolve_profile(
-        requested_root,
-        requested_root.name,
-        explicit_profile,
-    )
-    if _canonical_profile_path(context.profile_path) != _canonical_profile_path(
-        expected_profile
-    ):
-        raise OpenCodeAdapterInputError(
-            "OpenCode adapter context does not match the requested Profile or kit."
-        )
-    _validate_context_kit(context, kit_home)
-
-
-def _canonical_profile_path(value: str) -> Path:
-    return canonical_path(Path(os.path.abspath(value)))
-
-
-def _validate_context_kit(
-    context: TargetProjectContext, kit_home: Path
-) -> None:
-    resolved_kit = context.profile_environment.get("AGENT_RAILS_HOME", "")
-    if resolved_kit and canonical_path(Path(resolved_kit)) != kit_home:
-        raise OpenCodeAdapterInputError(
-            "OpenCode adapter context does not match the requested Profile or kit."
-        )
+    except TargetProjectContextMismatch as exc:
+        raise OpenCodeAdapterInputError(exc.message("OpenCode adapter")) from exc
+    except TargetProjectError as exc:
+        raise OpenCodeAdapterInputError(str(exc)) from exc
 
 
 def _build_layout(
@@ -436,26 +370,11 @@ def _build_layout(
     skills_dir = opencode_dir / "skills"
     commands_dir = opencode_dir / "command"
     plugins_dir = opencode_dir / "plugins"
-    local_ignore_path = context.root / ".gitignore"
-    if context.is_git_repo:
-        try:
-            completed = run_git(
-                context.root,
-                ("rev-parse", "--git-path", "info/exclude"),
-                environment=environment,
-            )
-        except OSError as exc:
-            raise OpenCodeAdapterError(
-                "Unable to resolve the Target Project local Git exclude file."
-            ) from exc
-        if completed.returncode != 0 or not completed.stdout.strip():
-            raise OpenCodeAdapterError(
-                "Unable to resolve the Target Project local Git exclude file."
-            )
-        git_ignore = Path(completed.stdout.strip())
-        local_ignore_path = (
-            git_ignore if git_ignore.is_absolute() else context.root / git_ignore
-        )
+    local_ignore_path = resolve_local_ignore_path(
+        context.root,
+        is_git_repo=context.is_git_repo,
+        environment=environment,
+    )
     return _OpenCodeLayout(
         opencode_dir=opencode_dir,
         skills_dir=skills_dir,
@@ -1362,51 +1281,3 @@ def _is_generated_guide(path: Path) -> bool:
     return _file_contains(path, ("<!-- agent-rails:generated -->",)) or _file_contains(
         path, ("Agent Rails Version:", "Visible session marker protocol")
     )
-
-
-def _stdout(events: list[OpenCodeEvent], text: str) -> None:
-    events.append(OpenCodeEvent(OpenCodeEventStream.STDOUT, text))
-
-
-def _stdout_many(events: list[OpenCodeEvent], messages: Tuple[str, ...]) -> None:
-    for message in messages:
-        _stdout(events, message)
-
-
-def _sanitize_events(
-    events: Tuple[OpenCodeEvent, ...],
-) -> Tuple[OpenCodeEvent, ...]:
-    return tuple(
-        OpenCodeEvent(event.stream, _terminal_literal(str(event.text)))
-        for event in events
-    )
-
-
-def _terminal_literal(value: str) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append("\\n")
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif category in {"Cc", "Cf", "Zl", "Zp"} or 0xD800 <= codepoint <= 0xDFFF:
-            if codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
-
-
-def _render_event_stream(
-    events: Tuple[OpenCodeEvent, ...], stream: OpenCodeEventStream
-) -> str:
-    selected = [event.text for event in events if event.stream is stream]
-    return "" if not selected else "\n".join(selected) + "\n"

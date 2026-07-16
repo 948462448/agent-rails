@@ -2,24 +2,29 @@
 
 from __future__ import annotations
 
-import codecs
 from dataclasses import dataclass, field
 from enum import Enum
 import os
 from pathlib import Path
-import selectors
 import shlex
-import signal
 import subprocess
 import sys
-import time
 from typing import Callable, Mapping, Optional, Sequence, Tuple
-import unicodedata
 
 from agent_rails.config.target_project import (
     TargetProjectContext,
     TargetProjectError,
     resolve_target_project,
+)
+from agent_rails.core.process import (
+    stop_process_group as _stop_process_group,
+    stream_process_output,
+)
+from agent_rails.core.terminal import (
+    render_chunk_events as _render_events,
+    terminal_literal as _terminal_literal,
+    terminal_stream_text as _terminal_stream_text,
+    terminal_text as _terminal_text,
 )
 from agent_rails.git._runner import isolated_git_environment
 
@@ -236,93 +241,30 @@ def _stream_default_command(command: UpdateCommand) -> UpdateCommandResult:
     except PermissionError as exc:
         return UpdateCommandResult(126, stderr=f"{exc}\n")
 
-    selector = selectors.DefaultSelector()
-    streams = (
-        (process.stdout, UpdateEventStream.STDOUT),
-        (process.stderr, UpdateEventStream.STDERR),
-    )
+    emit = command.emit
+    assert emit is not None
     try:
-        for stream, event_stream in streams:
-            assert stream is not None
-            os.set_blocking(stream.fileno(), False)
-            decoder = codecs.getincrementaldecoder("utf-8")(
-                errors="backslashreplace"
-            )
-            selector.register(stream, selectors.EVENT_READ, (event_stream, decoder))
-        while selector.get_map():
-            for key, _ in selector.select():
-                stream = key.fileobj
-                event_stream, decoder = key.data
-                try:
-                    chunk = os.read(stream.fileno(), 65_536)
-                except (BlockingIOError, InterruptedError):
-                    continue
-                if chunk:
-                    assert command.emit is not None
-                    command.emit(
-                        UpdateEvent(
-                            event_stream,
-                            _terminal_stream_text(decoder.decode(chunk)),
-                        )
-                    )
-                    continue
-                tail = decoder.decode(b"", final=True)
-                if tail:
-                    assert command.emit is not None
-                    command.emit(
-                        UpdateEvent(event_stream, _terminal_stream_text(tail))
-                    )
-                selector.unregister(stream)
-                stream.close()
-        exit_code = process.wait()
+        exit_code = stream_process_output(
+            process,
+            stdout_sink=lambda text: emit(
+                UpdateEvent(
+                    UpdateEventStream.STDOUT,
+                    _terminal_stream_text(text),
+                )
+            ),
+            stderr_sink=lambda text: emit(
+                UpdateEvent(
+                    UpdateEventStream.STDERR,
+                    _terminal_stream_text(text),
+                )
+            ),
+        )
         if exit_code < 0:
             exit_code = 128 - exit_code
         return UpdateCommandResult(exit_code, output_emitted=True)
     except BaseException:
         _stop_process_group(process)
         raise
-    finally:
-        selector.close()
-        for stream, _ in streams:
-            if stream is not None and not stream.closed:
-                try:
-                    stream.close()
-                except OSError:
-                    pass
-
-
-def _stop_process_group(process: subprocess.Popen[bytes]) -> None:
-    process_group = process.pid
-    try:
-        os.killpg(process_group, signal.SIGTERM)
-    except OSError:
-        pass
-    try:
-        process.wait(timeout=0.25)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    if _process_group_alive(process_group):
-        try:
-            os.killpg(process_group, signal.SIGKILL)
-        except OSError:
-            pass
-    try:
-        process.wait(timeout=1)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    deadline = time.monotonic() + 1
-    while _process_group_alive(process_group) and time.monotonic() < deadline:
-        time.sleep(0.01)
-
-
-def _process_group_alive(process_group: int) -> bool:
-    try:
-        os.killpg(process_group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def _default_reexec(request: UpdateReexecRequest) -> None:
@@ -1205,45 +1147,3 @@ def _chunk(
     events: list[UpdateEvent], stream: UpdateEventStream, value: str
 ) -> None:
     events.append(UpdateEvent(stream, _terminal_stream_text(value)))
-
-
-def _render_events(
-    events: Sequence[UpdateEvent], stream: UpdateEventStream
-) -> str:
-    return "".join(event.text for event in events if event.stream is stream)
-
-
-def _terminal_literal(value: str) -> str:
-    return _terminal_text(value, preserve_newline=False)
-
-
-def _terminal_stream_text(value: str) -> str:
-    return _terminal_text(value, preserve_newline=True)
-
-
-def _terminal_text(value: str, *, preserve_newline: bool) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n" and preserve_newline:
-            escaped.append(character)
-        elif character == "\n":
-            escaped.append("\\n")
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif (
-            category in {"Cc", "Cf", "Zl", "Zp"}
-            or 0xD800 <= codepoint <= 0xDFFF
-        ):
-            if codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)

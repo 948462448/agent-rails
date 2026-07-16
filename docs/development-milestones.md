@@ -92,11 +92,13 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Moved Release archive construction, standalone installation, and SessionStart host policy into Python while retaining only deterministic build, cold-start, and host-protocol bootstraps.
 - Moved Init guide rendering and Skills publication into Python, moved Estimate's final Profile policy behind the typed Python Interface, and deleted the last shared Paths Shell after all callers migrated.
 - Removed all public-command Compatibility Shells and the Release Builder wrapper after switching the Python dispatcher, CI, and tests to isolated Python-helper execution. Production Shell is now 47 lines across four true operating-system/host/cold-start seams, down from 7,425.
+- Deepened repeated runtime behavior into shared Terminal Output, Adapter Output, Child Process, Target Project Context validation, local Git exclude, and file-stability Modules while keeping tool-specific lifecycle policy separate.
+- Added Related Test Selection for refactor-slice feedback while retaining the 172-entry full regression gate.
+- Completed the 0.6.1 release candidate gate: all regressions passed, deterministic assets and checksum were verified, the cold-start installer switched versioned directories correctly, and OpenCode completed a clean install/uninstall/reinstall/update/doctor/Task Pack smoke in a real Target Project.
 
 ## Near-Term Backlog
 
 - Run one real OpenCode `off` versus `rails-lite` A/B fixture and record the non-sensitive summary.
-- Run the full regression suite and one clean GitHub Release install/update smoke against the final Python-first runtime.
 - Add a clearer repair command or doctor warning for stale adapter profile paths.
 - Extend the Sensitive Output Guard to encoded envelopes and carefully bounded high-entropy detection without increasing configuration false positives.
 - Add an optional publish receipt for artifact, configuration, and smoke-test evidence.

@@ -62,6 +62,26 @@ agent-rails upgrade self --version 0.6.1
 
 `agent-rails update --tool claude|codex|opencode` is the wider project maintenance loop: kit update, source tests when running from a Git checkout, the selected tool's target-project Doctor, Adapter refresh, and final Doctor. In a Release Install it uses the verified archive path and skips the source-only test suite. Tool selection is mandatory so maintenance cannot silently refresh the wrong Adapter.
 
+## Local release candidate
+
+Before tagging, build the same four assets through the isolated Python helper:
+
+```bash
+AGENT_RAILS_HOME="$PWD" \
+  python3 -I scripts/agent-python-cli.py release-build --output dist
+```
+
+For local testing of uncommitted refactor files, use a separate output directory and opt in explicitly:
+
+```bash
+AGENT_RAILS_HOME="$PWD" \
+  python3 -I scripts/agent-python-cli.py release-build \
+    --output dist/0.6.1-candidate \
+    --include-worktree
+```
+
+`--include-worktree` is only for a local candidate. Published assets must be rebuilt from the clean tagged tree by the Release workflow.
+
 ## Publishing a release
 
 Release automation is tag-driven and intentionally refuses ambiguous input:

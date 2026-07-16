@@ -8,7 +8,8 @@ import re
 import stat
 import sys
 from typing import Mapping, Optional, Sequence
-import unicodedata
+
+from agent_rails.core.terminal import terminal_literal as _terminal_literal
 
 
 _USAGE = """Usage:
@@ -365,32 +366,6 @@ def _validated_version(value: str, *, exit_code: int) -> str:
     if not _VERSION_PATTERN.fullmatch(value):
         raise _PublicCliError("Agent Rails version is invalid.", exit_code)
     return value
-
-
-def _terminal_literal(value: str) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if (
-            category in {"Cc", "Cf", "Zl", "Zp"}
-            or 0xD800 <= codepoint <= 0xDFFF
-        ):
-            if character == "\n":
-                escaped.append("\\n")
-            elif character == "\r":
-                escaped.append("\\r")
-            elif character == "\t":
-                escaped.append("\\t")
-            elif codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
 
 
 def _usage_error() -> _PublicCliError:

@@ -79,6 +79,20 @@ def canonical_path(path: Path) -> Path:
     return Path(os.path.realpath(str(path)))
 
 
+def same_file_metadata(left: os.stat_result, right: os.stat_result) -> bool:
+    """Return whether two observations describe one unchanged file."""
+
+    fields = (
+        "st_mode",
+        "st_size",
+        "st_mtime_ns",
+        "st_ctime_ns",
+        "st_dev",
+        "st_ino",
+    )
+    return all(getattr(left, field) == getattr(right, field) for field in fields)
+
+
 def sanitize_slug(value: str) -> str:
     lowered = value.lower().replace(" ", "-")
     slug = re.sub(r"[^a-z0-9._-]+", "-", lowered)

@@ -9,21 +9,10 @@ import subprocess
 import time
 from typing import Mapping, Optional
 
+from agent_rails.core.terminal import normalize_line_boundaries
+
 
 MAX_ONLINE_MEMORY_OUTPUT_BYTES = 1_000_000
-_LINE_BOUNDARIES = (
-    "\r\n",
-    "\n",
-    "\r",
-    "\v",
-    "\f",
-    "\x1c",
-    "\x1d",
-    "\x1e",
-    "\x85",
-    "\u2028",
-    "\u2029",
-)
 _ADAPTER_SUPERVISOR = r'''
 status_fd="$1"
 /bin/bash -c '
@@ -130,19 +119,7 @@ def query_online_memory(
         decoded = output.decode("utf-8")
     except UnicodeDecodeError:
         raise OnlineMemoryError("Online memory output is not valid UTF-8.") from None
-    return _normalize_line_boundaries(decoded)
-
-
-def _normalize_line_boundaries(text: str) -> str:
-    normalized = []
-    for line in text.splitlines(keepends=True):
-        for boundary in _LINE_BOUNDARIES:
-            if line.endswith(boundary):
-                normalized.append(line[: -len(boundary)] + "\n")
-                break
-        else:
-            normalized.append(line)
-    return "".join(normalized)
+    return normalize_line_boundaries(decoded)
 
 
 def _read_bounded_output(

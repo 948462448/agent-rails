@@ -12,15 +12,15 @@ import secrets
 import shlex
 import stat
 from typing import Any, Mapping, Optional, Tuple, Union
-import unicodedata
 
 from agent_rails.config.target_project import (
     TargetProjectContext,
-    resolve_project_root_identity,
+    TargetProjectContextMismatch,
+    TargetProjectError,
     resolve_target_project,
+    validate_target_project_context,
 )
-from agent_rails.core.paths import AgentRailsPaths, canonical_path
-from agent_rails.git._runner import run_git
+from agent_rails.core.terminal import terminal_literal as _terminal_literal
 
 from .content import (
     AdapterArtifact,
@@ -29,10 +29,20 @@ from .content import (
     AdapterType,
     render_adapter_content,
 )
+from .events import (
+    AdapterError,
+    AdapterEvent as ClaudeEvent,
+    AdapterEventStream as ClaudeEventStream,
+    AdapterOutput,
+    append_stdout as _stdout,
+    append_stdout_many as _stdout_many,
+    sanitize_events as _sanitize_events,
+)
 from .workspace import (
     ManagedAdapterWorkspace,
     ManagedAdapterWorkspaceConfig,
     ManagedAdapterWorkspaceError,
+    resolve_local_ignore_path,
 )
 
 
@@ -86,27 +96,8 @@ Before final delivery, and as Step 0 for deploy/release/upload workflows that co
 """
 
 
-class ClaudeAdapterError(RuntimeError):
+class ClaudeAdapterError(AdapterError):
     """The Claude adapter request could not be completed."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        exit_code: int = 1,
-        events: Tuple["ClaudeEvent", ...] = (),
-    ) -> None:
-        super().__init__(_terminal_literal(message))
-        self.exit_code = exit_code
-        self.events = _sanitize_events(events)
-
-    @property
-    def stdout(self) -> str:
-        return _render_event_stream(self.events, ClaudeEventStream.STDOUT)
-
-    @property
-    def stderr(self) -> str:
-        return _render_event_stream(self.events, ClaudeEventStream.STDERR)
 
 
 class ClaudeAdapterInputError(ClaudeAdapterError):
@@ -124,11 +115,6 @@ class ClaudeAction(str, Enum):
 class ClaudeInstallMode(str, Enum):
     LOCAL = "local"
     PROJECT = "project"
-
-
-class ClaudeEventStream(str, Enum):
-    STDOUT = "stdout"
-    STDERR = "stderr"
 
 
 @dataclass(frozen=True)
@@ -160,28 +146,13 @@ ClaudeAdapterRequest = Union[ClaudeInstallRequest, ClaudeUninstallRequest]
 
 
 @dataclass(frozen=True)
-class ClaudeEvent:
-    stream: ClaudeEventStream
-    text: str
-
-
-@dataclass(frozen=True)
-class ClaudeAdapterResult:
+class ClaudeAdapterResult(AdapterOutput):
     action: ClaudeAction
     project_root: Path
     profile_path: str
     task_pack_path: str
     mode: ClaudeInstallMode
     events: Tuple[ClaudeEvent, ...]
-
-    @property
-    def stdout(self) -> str:
-        return _render_event_stream(self.events, ClaudeEventStream.STDOUT)
-
-    @property
-    def stderr(self) -> str:
-        return _render_event_stream(self.events, ClaudeEventStream.STDERR)
-
 
 @dataclass(frozen=True)
 class _ClaudeLayout:
@@ -249,10 +220,10 @@ def run_claude_adapter(
             environment=environment,
         )
     version = _resolve_version(kit_home, environment)
-    layout = _build_layout(context, kit_home, environment)
     events: list[ClaudeEvent] = []
 
     try:
+        layout = _build_layout(context, kit_home, environment)
         workspace = ManagedAdapterWorkspace(
             ManagedAdapterWorkspaceConfig(
                 home=kit_home,
@@ -367,55 +338,18 @@ def _validate_pre_resolved_context(
 ) -> None:
     """Reject a context that was resolved for a different invocation."""
 
-    if not isinstance(context, TargetProjectContext):
-        raise ClaudeAdapterInputError(
-            "Claude adapter context must be a TargetProjectContext."
+    try:
+        validate_target_project_context(
+            context,
+            requested_project=requested_project,
+            kit_home=kit_home,
+            explicit_profile=explicit_profile,
+            environment=environment,
         )
-    if not isinstance(context.root, Path) or not isinstance(
-        context.profile_path, str
-    ):
-        raise ClaudeAdapterInputError(
-            "Claude adapter context has invalid project or Profile fields."
-        )
-    if not requested_project.is_dir():
-        raise ClaudeAdapterInputError(
-            f"Project directory not found: {requested_project}"
-        )
-    requested_root, _ = resolve_project_root_identity(
-        requested_project, environment
-    )
-    if canonical_path(context.root) != requested_root:
-        raise ClaudeAdapterInputError(
-            "Claude adapter context does not match the requested project."
-        )
-    expected_profile = AgentRailsPaths.from_environment(
-        kit_home, environment
-    ).resolve_profile(
-        requested_root,
-        requested_root.name,
-        explicit_profile,
-    )
-    if _canonical_profile_path(context.profile_path) != _canonical_profile_path(
-        expected_profile
-    ):
-        raise ClaudeAdapterInputError(
-            "Claude adapter context does not match the requested Profile or kit."
-        )
-    _validate_context_kit(context, kit_home)
-
-
-def _canonical_profile_path(value: str) -> Path:
-    return canonical_path(Path(os.path.abspath(value)))
-
-
-def _validate_context_kit(
-    context: TargetProjectContext, kit_home: Path
-) -> None:
-    resolved_kit = context.profile_environment.get("AGENT_RAILS_HOME", "")
-    if resolved_kit and canonical_path(Path(resolved_kit)) != kit_home:
-        raise ClaudeAdapterInputError(
-            "Claude adapter context does not match the requested Profile or kit."
-        )
+    except TargetProjectContextMismatch as exc:
+        raise ClaudeAdapterInputError(exc.message("Claude adapter")) from exc
+    except TargetProjectError as exc:
+        raise ClaudeAdapterInputError(str(exc)) from exc
 
 
 def _build_layout(
@@ -425,26 +359,11 @@ def _build_layout(
 ) -> _ClaudeLayout:
     claude_dir = context.root / ".claude"
     commands_dir = claude_dir / "commands"
-    local_ignore_path = context.root / ".gitignore"
-    if context.is_git_repo:
-        try:
-            completed = run_git(
-                context.root,
-                ("rev-parse", "--git-path", "info/exclude"),
-                environment=environment,
-            )
-        except OSError as exc:
-            raise ClaudeAdapterError(
-                "Unable to resolve the Target Project local Git exclude file."
-            ) from exc
-        if completed.returncode != 0 or not completed.stdout.strip():
-            raise ClaudeAdapterError(
-                "Unable to resolve the Target Project local Git exclude file."
-            )
-        candidate = Path(completed.stdout.strip())
-        local_ignore_path = (
-            candidate if candidate.is_absolute() else context.root / candidate
-        )
+    local_ignore_path = resolve_local_ignore_path(
+        context.root,
+        is_git_repo=context.is_git_repo,
+        environment=environment,
+    )
 
     profile_values = context.profile_values
     user_rules_value = profile_values.get(
@@ -1586,49 +1505,3 @@ def _resolve_version(kit_home: Path, environment: Mapping[str, str]) -> str:
     except (OSError, UnicodeError) as exc:
         raise ClaudeAdapterError(f"Unable to read Agent Rails version: {path}") from exc
     return ""
-
-
-def _stdout(events: list[ClaudeEvent], text: str) -> None:
-    events.append(ClaudeEvent(ClaudeEventStream.STDOUT, text))
-
-
-def _stdout_many(events: list[ClaudeEvent], messages: Tuple[str, ...]) -> None:
-    for message in messages:
-        _stdout(events, message)
-
-
-def _sanitize_events(events: Tuple[ClaudeEvent, ...]) -> Tuple[ClaudeEvent, ...]:
-    return tuple(
-        ClaudeEvent(event.stream, _terminal_literal(str(event.text)))
-        for event in events
-    )
-
-
-def _terminal_literal(value: str) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append("\\n")
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif category in {"Cc", "Cf", "Zl", "Zp"} or 0xD800 <= codepoint <= 0xDFFF:
-            if codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
-
-
-def _render_event_stream(
-    events: Tuple[ClaudeEvent, ...], stream: ClaudeEventStream
-) -> str:
-    selected = [event.text for event in events if event.stream is stream]
-    return "" if not selected else "\n".join(selected) + "\n"

@@ -14,21 +14,30 @@ import signal
 import stat
 import subprocess
 from typing import Mapping, Optional, Tuple, Union
-import unicodedata
 
 from agent_rails.adapters.claude import ClaudeInstallMode
 from agent_rails.config.target_project import (
     TargetProjectContext,
+    TargetProjectContextMismatch,
     TargetProjectError,
-    resolve_project_root_identity,
     resolve_target_project,
+    validate_target_project_context,
 )
-from agent_rails.core.paths import AgentRailsPaths, canonical_path
+from agent_rails.core.terminal import terminal_literal as _terminal_literal
 from agent_rails.diagnostics.doctor import (
     DoctorError,
     DoctorEventStream,
     DoctorRequest,
     run_doctor,
+)
+
+from .events import (
+    AdapterError,
+    AdapterEvent as CodexEvent,
+    AdapterEventStream as CodexEventStream,
+    AdapterOutput,
+    append_event as _event,
+    append_stdout as _stdout,
 )
 
 
@@ -39,27 +48,8 @@ _MAX_CHILD_OUTPUT_BYTES = 1_000_000
 _CHILD_READ_BYTES = 64 * 1024
 
 
-class CodexAdapterError(RuntimeError):
+class CodexAdapterError(AdapterError):
     """A Codex lifecycle request could not be completed."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        exit_code: int = 1,
-        events: Tuple["CodexEvent", ...] = (),
-    ) -> None:
-        super().__init__(_terminal_literal(message))
-        self.exit_code = exit_code
-        self.events = events
-
-    @property
-    def stdout(self) -> str:
-        return _render_events(self.events, CodexEventStream.STDOUT)
-
-    @property
-    def stderr(self) -> str:
-        return _render_events(self.events, CodexEventStream.STDERR)
 
 
 class CodexAdapterInputError(CodexAdapterError):
@@ -78,11 +68,6 @@ class CodexAction(str, Enum):
 class CodexInstallMode(str, Enum):
     LOCAL = "local"
     PROJECT = "project"
-
-
-class CodexEventStream(str, Enum):
-    STDOUT = "stdout"
-    STDERR = "stderr"
 
 
 @dataclass(frozen=True)
@@ -122,28 +107,13 @@ CodexAdapterRequest = Union[
 
 
 @dataclass(frozen=True)
-class CodexEvent:
-    stream: CodexEventStream
-    text: str
-
-
-@dataclass(frozen=True)
-class CodexAdapterResult:
+class CodexAdapterResult(AdapterOutput):
     action: CodexAction
     project_root: Optional[Path]
     profile_path: Optional[str]
     mode: CodexInstallMode
     exit_code: int
     events: Tuple[CodexEvent, ...]
-
-    @property
-    def stdout(self) -> str:
-        return _render_events(self.events, CodexEventStream.STDOUT)
-
-    @property
-    def stderr(self) -> str:
-        return _render_events(self.events, CodexEventStream.STDERR)
-
 
 @dataclass(frozen=True)
 class _CodexCommandResult:
@@ -327,61 +297,23 @@ def _validate_pre_resolved_context(
 ) -> None:
     """Reject a context that was resolved for a different invocation."""
 
-    if not isinstance(context, TargetProjectContext):
-        raise CodexAdapterInputError(
-            "Codex adapter context must be a TargetProjectContext."
-        )
-    if not isinstance(context.root, Path) or not isinstance(
-        context.profile_path, str
-    ):
-        raise CodexAdapterInputError(
-            "Codex adapter context has invalid project or Profile fields."
-        )
     requested_project = getattr(request, "requested_project", None)
     if requested_project is None:
         raise CodexAdapterInputError(
             "Codex adapter context requires a project-scoped request."
         )
-    if not requested_project.is_dir():
-        raise CodexAdapterInputError(
-            f"Project directory not found: {requested_project}"
+    try:
+        validate_target_project_context(
+            context,
+            requested_project=requested_project,
+            kit_home=kit_home,
+            explicit_profile=getattr(request, "explicit_profile", None),
+            environment=environment,
         )
-    requested_root, _ = resolve_project_root_identity(
-        requested_project, environment
-    )
-    if canonical_path(context.root) != requested_root:
-        raise CodexAdapterInputError(
-            "Codex adapter context does not match the requested project."
-        )
-    explicit_profile = getattr(request, "explicit_profile", None)
-    expected_profile = AgentRailsPaths.from_environment(
-        kit_home, environment
-    ).resolve_profile(
-        requested_root,
-        requested_root.name,
-        explicit_profile,
-    )
-    if _canonical_profile_path(context.profile_path) != _canonical_profile_path(
-        expected_profile
-    ):
-        raise CodexAdapterInputError(
-            "Codex adapter context does not match the requested Profile or kit."
-        )
-    _validate_context_kit(context, kit_home)
-
-
-def _canonical_profile_path(value: str) -> Path:
-    return canonical_path(Path(os.path.abspath(value)))
-
-
-def _validate_context_kit(
-    context: TargetProjectContext, kit_home: Path
-) -> None:
-    resolved_kit = context.profile_environment.get("AGENT_RAILS_HOME", "")
-    if resolved_kit and canonical_path(Path(resolved_kit)) != kit_home:
-        raise CodexAdapterInputError(
-            "Codex adapter context does not match the requested Profile or kit."
-        )
+    except TargetProjectContextMismatch as exc:
+        raise CodexAdapterInputError(exc.message("Codex adapter")) from exc
+    except TargetProjectError as exc:
+        raise CodexAdapterInputError(str(exc)) from exc
 
 
 def _install(
@@ -761,10 +693,6 @@ def _resolve_version(kit_home: Path, environment: Mapping[str, str]) -> str:
     return ""
 
 
-def _stdout(events: list[CodexEvent], text: str) -> None:
-    _event(events, CodexEventStream.STDOUT, text)
-
-
 def _stdout_process(events: list[CodexEvent], text: str) -> None:
     lines = text.splitlines()
     for line in lines:
@@ -774,39 +702,3 @@ def _stdout_process(events: list[CodexEvent], text: str) -> None:
 def _stderr_process(events: list[CodexEvent], text: str) -> None:
     for line in text.splitlines():
         _event(events, CodexEventStream.STDERR, line)
-
-
-def _event(
-    events: list[CodexEvent], stream: CodexEventStream, text: str
-) -> None:
-    events.append(CodexEvent(stream, _terminal_literal(text)))
-
-
-def _terminal_literal(value: str) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append("\\n")
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif category in {"Cc", "Cf", "Zl", "Zp"} or 0xD800 <= codepoint <= 0xDFFF:
-            if codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
-
-
-def _render_events(
-    events: Tuple[CodexEvent, ...], stream: CodexEventStream
-) -> str:
-    selected = [event.text for event in events if event.stream is stream]
-    return "" if not selected else "\n".join(selected) + "\n"

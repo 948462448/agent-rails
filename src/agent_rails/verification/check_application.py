@@ -1,25 +1,25 @@
 from __future__ import annotations
 
-import codecs
 from dataclasses import dataclass
 from enum import Enum
 import os
 from pathlib import Path
-import selectors
-import signal
 import subprocess
 import sys
-import time
-from typing import BinaryIO, Mapping, Optional, TextIO, Tuple
-import unicodedata
+from typing import Mapping, Optional, TextIO, Tuple
 
 from agent_rails.config.target_project import (
     TargetProjectContext,
-    TargetProjectError,
-    resolve_project_root_identity,
+    TargetProjectContextMismatch,
     resolve_target_project,
+    validate_target_project_context,
 )
-from agent_rails.core.paths import AgentRailsPaths, canonical_path
+from agent_rails.core.process import (
+    ChildProcessStreamError,
+    stop_process_group as _stop_child_process,
+    stream_process_output,
+)
+from agent_rails.core.terminal import terminal_stream_text as _terminal_stream_text
 from agent_rails.git._runner import isolated_git_environment
 from agent_rails.git.scope import (
     GitScope,
@@ -267,58 +267,19 @@ def _validate_pre_resolved_context(
 ) -> None:
     """Reject a context resolved for a different project, Profile, or kit."""
 
-    if not isinstance(context, TargetProjectContext):
-        raise CheckInputError("Check context must be a TargetProjectContext.")
-    if not isinstance(context.root, Path) or not isinstance(
-        context.profile_path, str
-    ):
-        raise CheckInputError(
-            "Check context has invalid project or Profile fields."
-        )
-    if not isinstance(
-        request.requested_project, Path
-    ) or not request.requested_project.is_dir():
-        raise CheckInputError(
-            f"Project directory not found: {request.requested_project}"
-        )
     try:
-        requested_root, requested_is_git_repo = resolve_project_root_identity(
-            request.requested_project,
-            environment,
+        validate_target_project_context(
+            context,
+            requested_project=request.requested_project,
+            kit_home=request.kit_home,
+            explicit_profile=request.explicit_profile,
+            environment=environment,
+            match_git_identity=True,
         )
+    except TargetProjectContextMismatch as exc:
+        raise CheckInputError(exc.message("Check")) from exc
     except TargetProjectError as exc:
         raise CheckInputError(str(exc)) from exc
-    if (
-        canonical_path(context.root) != requested_root
-        or context.is_git_repo != requested_is_git_repo
-    ):
-        raise CheckInputError(
-            "Check context does not match the requested project."
-        )
-    expected_profile = AgentRailsPaths.from_environment(
-        request.kit_home, environment
-    ).resolve_profile(
-        requested_root,
-        requested_root.name,
-        request.explicit_profile,
-    )
-    if _canonical_profile_path(context.profile_path) != _canonical_profile_path(
-        expected_profile
-    ):
-        raise CheckInputError(
-            "Check context does not match the requested Profile or kit."
-        )
-    resolved_kit = context.profile_environment.get("AGENT_RAILS_HOME", "")
-    if resolved_kit and canonical_path(Path(resolved_kit)) != canonical_path(
-        request.kit_home
-    ):
-        raise CheckInputError(
-            "Check context does not match the requested Profile or kit."
-        )
-
-
-def _canonical_profile_path(value: str) -> Path:
-    return canonical_path(Path(os.path.abspath(value)))
 
 
 def render_check_report(prepared: PreparedCheck) -> str:
@@ -489,65 +450,33 @@ def _stream_child_output(
 ) -> int:
     """Drain stdout and stderr concurrently without retaining child output."""
 
-    configured = (
-        (process.stdout, stdout),
-        (process.stderr, stderr),
-    )
-    streams: list[BinaryIO] = []
-    selector = selectors.DefaultSelector()
     try:
-        for stream, writer in configured:
-            if writer is None:
-                continue
-            if stream is None:
-                raise CheckApplicationError(
-                    "Verification command output stream is unavailable."
+        return stream_process_output(
+            process,
+            stdout_sink=(
+                None
+                if stdout is None
+                else lambda text: _write_output(
+                    stdout,
+                    _terminal_stream_text(text),
+                    flush=True,
                 )
-            descriptor = stream.fileno()
-            os.set_blocking(descriptor, False)
-            decoder = codecs.getincrementaldecoder("utf-8")(
-                errors="backslashreplace"
-            )
-            selector.register(
-                stream,
-                selectors.EVENT_READ,
-                (writer, decoder),
-            )
-            streams.append(stream)
-
-        while selector.get_map():
-            for key, _ in selector.select():
-                stream = key.fileobj
-                writer, decoder = key.data
-                try:
-                    chunk = os.read(stream.fileno(), _CHILD_READ_BYTES)
-                except (BlockingIOError, InterruptedError):
-                    continue
-                if chunk:
-                    _write_output(
-                        writer,
-                        _terminal_stream_text(decoder.decode(chunk)),
-                        flush=True,
-                    )
-                    continue
-                tail = decoder.decode(b"", final=True)
-                if tail:
-                    _write_output(
-                        writer,
-                        _terminal_stream_text(tail),
-                        flush=True,
-                    )
-                selector.unregister(stream)
-                stream.close()
-        return process.wait()
-    finally:
-        selector.close()
-        for stream in streams:
-            if not stream.closed:
-                try:
-                    stream.close()
-                except OSError:
-                    pass
+            ),
+            stderr_sink=(
+                None
+                if stderr is None
+                else lambda text: _write_output(
+                    stderr,
+                    _terminal_stream_text(text),
+                    flush=True,
+                )
+            ),
+            chunk_bytes=_CHILD_READ_BYTES,
+        )
+    except ChildProcessStreamError as exc:
+        raise CheckApplicationError(
+            "Verification command output stream is unavailable."
+        ) from exc
 
 
 def _write_output(writer: TextIO, text: str, *, flush: bool) -> None:
@@ -568,40 +497,6 @@ def _write_output(writer: TextIO, text: str, *, flush: bool) -> None:
         ) from exc
 
 
-def _stop_child_process(process: subprocess.Popen[bytes]) -> None:
-    process_group = process.pid
-    try:
-        os.killpg(process_group, signal.SIGTERM)
-    except OSError:
-        pass
-    try:
-        process.wait(timeout=0.25)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    if _process_group_alive(process_group):
-        try:
-            os.killpg(process_group, signal.SIGKILL)
-        except OSError:
-            pass
-    try:
-        process.wait(timeout=1)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    deadline = time.monotonic() + 1
-    while _process_group_alive(process_group) and time.monotonic() < deadline:
-        time.sleep(0.01)
-
-
-def _process_group_alive(process_group: int) -> bool:
-    try:
-        os.killpg(process_group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 def _close_child_pipes(process: subprocess.Popen[bytes]) -> None:
     for stream in (process.stdout, process.stderr):
         if stream is None or stream.closed:
@@ -610,32 +505,6 @@ def _close_child_pipes(process: subprocess.Popen[bytes]) -> None:
             stream.close()
         except OSError:
             pass
-
-
-def _terminal_stream_text(value: str) -> str:
-    escaped = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append(character)
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif (
-            category in {"Cc", "Cf", "Zl", "Zp"}
-            or 0xD800 <= codepoint <= 0xDFFF
-        ):
-            if codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
 
 
 def _validate_execution_snapshot(prepared: PreparedCheck) -> None:

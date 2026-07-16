@@ -11,16 +11,17 @@ import stat
 import subprocess
 import tempfile
 from typing import BinaryIO, Iterable, Iterator, Mapping, Optional, Sequence, Tuple
-import unicodedata
 
 from agent_rails.config.profile import ProfileLoadError
 from agent_rails.config.target_project import (
     TargetProjectContext,
+    TargetProjectContextMismatch,
     TargetProjectError,
-    resolve_project_root_identity,
     resolve_target_project,
+    validate_target_project_context,
 )
-from agent_rails.core.paths import AgentRailsPaths, canonical_path
+from agent_rails.core.paths import same_file_metadata
+from agent_rails.core.terminal import terminal_literal as _terminal_literal
 from agent_rails.git._runner import isolated_git_environment, run_git
 from agent_rails.git.scope import (
     GitScope,
@@ -409,58 +410,19 @@ def _validate_pre_resolved_context(
 ) -> None:
     """Reject a context resolved for a different project, Profile, or kit."""
 
-    if not isinstance(context, TargetProjectContext):
-        raise PublishCheckInputError(
-            "Publish check context must be a TargetProjectContext."
-        )
-    if not isinstance(context.root, Path) or not isinstance(
-        context.profile_path, str
-    ):
-        raise PublishCheckInputError(
-            "Publish check context has invalid project or Profile fields."
-        )
-    if not request.requested_project.is_dir():
-        raise PublishCheckInputError(
-            f"Project directory not found: {request.requested_project}"
-        )
     try:
-        requested_root, requested_is_git_repo = resolve_project_root_identity(
-            request.requested_project,
-            environment,
+        validate_target_project_context(
+            context,
+            requested_project=request.requested_project,
+            kit_home=request.kit_home,
+            explicit_profile=request.explicit_profile,
+            environment=environment,
+            match_git_identity=True,
         )
+    except TargetProjectContextMismatch as exc:
+        raise PublishCheckInputError(exc.message("Publish check")) from exc
     except TargetProjectError as exc:
         raise PublishCheckInputError(str(exc)) from exc
-    if (
-        canonical_path(context.root) != requested_root
-        or context.is_git_repo != requested_is_git_repo
-    ):
-        raise PublishCheckInputError(
-            "Publish check context does not match the requested project."
-        )
-    expected_profile = AgentRailsPaths.from_environment(
-        request.kit_home, environment
-    ).resolve_profile(
-        requested_root,
-        requested_root.name,
-        request.explicit_profile,
-    )
-    if _canonical_profile_path(context.profile_path) != _canonical_profile_path(
-        expected_profile
-    ):
-        raise PublishCheckInputError(
-            "Publish check context does not match the requested Profile or kit."
-        )
-    resolved_kit = context.profile_environment.get("AGENT_RAILS_HOME", "")
-    if resolved_kit and canonical_path(Path(resolved_kit)) != canonical_path(
-        request.kit_home
-    ):
-        raise PublishCheckInputError(
-            "Publish check context does not match the requested Profile or kit."
-        )
-
-
-def _canonical_profile_path(value: str) -> Path:
-    return canonical_path(Path(os.path.abspath(value)))
 
 
 def _validate_request(request: PublishCheckRequest) -> None:
@@ -1176,7 +1138,7 @@ def _snapshot_worktree_path(
         finally:
             os.close(output)
         closed = os.fstat(descriptor)
-        if not _same_file(opened, closed):
+        if not same_file_metadata(opened, closed):
             raise PublishCheckError(
                 "Publish scope moved while snapshotting unstaged content."
             )
@@ -1259,7 +1221,7 @@ def _scan_untracked_path(project: Path, relative_path: str) -> Tuple[str, ...]:
         opened = os.fstat(descriptor)
         if _contains_nul(descriptor):
             closed = os.fstat(descriptor)
-            if not _same_file(opened, closed):
+            if not same_file_metadata(opened, closed):
                 raise PublishCheckError(
                     "Unable to inspect untracked file for sensitive output: "
                     f"{_terminal_literal(relative_path)}"
@@ -1281,7 +1243,7 @@ def _scan_untracked_path(project: Path, relative_path: str) -> Tuple[str, ...]:
                 f"{_terminal_literal(relative_path)}"
             ) from exc
         closed = os.fstat(descriptor)
-        if not _same_file(opened, closed):
+        if not same_file_metadata(opened, closed):
             raise PublishCheckError(
                 "Unable to inspect untracked file for sensitive output: "
                 f"{_terminal_literal(relative_path)}"
@@ -1350,7 +1312,7 @@ def _read_project_symlink(
             return None
         target = os.readlink(parts[-1], dir_fd=current)
         closed = os.stat(parts[-1], dir_fd=current, follow_symlinks=False)
-        if not _same_file(opened, closed):
+        if not same_file_metadata(opened, closed):
             raise PublishCheckError(
                 "Publish scope moved while reading an untracked symlink."
             )
@@ -1479,24 +1441,6 @@ def _text_records(descriptor: int, relative_path: str) -> Iterator[str]:
         yield bytes(pending).rstrip(b"\r").decode("utf-8", "surrogateescape")
 
 
-def _same_file(left: os.stat_result, right: os.stat_result) -> bool:
-    return (
-        left.st_mode,
-        left.st_size,
-        left.st_mtime_ns,
-        left.st_ctime_ns,
-        left.st_dev,
-        left.st_ino,
-    ) == (
-        right.st_mode,
-        right.st_size,
-        right.st_mtime_ns,
-        right.st_ctime_ns,
-        right.st_dev,
-        right.st_ino,
-    )
-
-
 def _append_status_group(
     lines: list[str], title: str, paths: Tuple[str, ...]
 ) -> None:
@@ -1527,28 +1471,3 @@ def _render_visible_suggestions(plan: VerificationPlan) -> str:
         f"{_terminal_literal(step.command)}\n"
         for step in plan.steps
     )
-
-
-def _terminal_literal(value: str) -> str:
-    escaped = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append("\\n")
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif codepoint == 27:
-            escaped.append("\\x1b")
-        elif category == "Cc":
-            escaped.append(f"\\x{codepoint:02x}")
-        elif category in {"Cf", "Zl", "Zp"} or 0xD800 <= codepoint <= 0xDFFF:
-            if codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)

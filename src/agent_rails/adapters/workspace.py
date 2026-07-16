@@ -11,7 +11,7 @@ import re
 import secrets
 import stat
 import subprocess
-from typing import Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence, Tuple
 
 from agent_rails.git._runner import run_git
 
@@ -24,6 +24,35 @@ _MANAGED_SKILLS_FORMAT = "agent-rails-managed-skills-v2"
 
 class ManagedAdapterWorkspaceError(RuntimeError):
     """Raised when a managed adapter workspace request is unsafe or invalid."""
+
+
+def resolve_local_ignore_path(
+    project: Path,
+    *,
+    is_git_repo: bool,
+    environment: Mapping[str, str],
+) -> Path:
+    """Resolve the personal ignore file used by one Local Adapter."""
+
+    if not is_git_repo:
+        return project / ".gitignore"
+    try:
+        completed = run_git(
+            project,
+            ("rev-parse", "--git-path", "info/exclude"),
+            environment=environment,
+        )
+    except OSError as exc:
+        raise ManagedAdapterWorkspaceError(
+            "Unable to resolve the Target Project local Git exclude file."
+        ) from exc
+    value = completed.stdout.strip()
+    if completed.returncode != 0 or not value:
+        raise ManagedAdapterWorkspaceError(
+            "Unable to resolve the Target Project local Git exclude file."
+        )
+    candidate = Path(value)
+    return candidate if candidate.is_absolute() else project / candidate
 
 
 @dataclass(frozen=True)

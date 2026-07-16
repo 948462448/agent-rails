@@ -49,6 +49,23 @@ class TargetProjectError(RuntimeError):
     pass
 
 
+class TargetProjectContextMismatch(TargetProjectError):
+    """Describe one invariant violated by a supplied Target Project Context."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+    def message(self, subject: str) -> str:
+        if self.reason == "type":
+            return f"{subject} context must be a TargetProjectContext."
+        if self.reason == "fields":
+            return f"{subject} context has invalid project or Profile fields."
+        if self.reason == "project":
+            return f"{subject} context does not match the requested project."
+        return f"{subject} context does not match the requested Profile or kit."
+
+
 @dataclass(frozen=True)
 class TargetProjectContext:
     root: Path
@@ -195,3 +212,55 @@ def resolve_project_root_identity(
     if completed.returncode != 0:
         return requested, False
     return canonical_path(Path(completed.stdout.strip())), True
+
+
+def validate_target_project_context(
+    context: TargetProjectContext,
+    *,
+    requested_project: Path,
+    kit_home: Path,
+    explicit_profile: Optional[str],
+    environment: Mapping[str, str],
+    match_git_identity: bool = False,
+) -> None:
+    """Validate that a pre-resolved Context belongs to this invocation."""
+
+    if not isinstance(context, TargetProjectContext):
+        raise TargetProjectContextMismatch("type")
+    if not isinstance(context.root, Path) or not isinstance(
+        context.profile_path, str
+    ):
+        raise TargetProjectContextMismatch("fields")
+    if not isinstance(requested_project, Path) or not requested_project.is_dir():
+        raise TargetProjectError(f"Project directory not found: {requested_project}")
+
+    requested_root, requested_is_git_repo = resolve_project_root_identity(
+        requested_project,
+        environment,
+    )
+    if canonical_path(context.root) != requested_root or (
+        match_git_identity and context.is_git_repo != requested_is_git_repo
+    ):
+        raise TargetProjectContextMismatch("project")
+
+    paths = AgentRailsPaths.from_environment(
+        kit_home,
+        environment,
+    )
+    expected_profile = paths.resolve_profile(
+        requested_root,
+        requested_root.name,
+        explicit_profile,
+    )
+    if _canonical_profile_path(context.profile_path) != _canonical_profile_path(
+        expected_profile
+    ):
+        raise TargetProjectContextMismatch("profile")
+
+    resolved_kit = context.profile_environment.get("AGENT_RAILS_HOME", "")
+    if resolved_kit and canonical_path(Path(resolved_kit)) != paths.kit_home:
+        raise TargetProjectContextMismatch("kit")
+
+
+def _canonical_profile_path(value: str) -> Path:
+    return canonical_path(Path(os.path.abspath(value)))

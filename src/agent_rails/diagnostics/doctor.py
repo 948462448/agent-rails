@@ -14,7 +14,6 @@ import shutil
 import stat
 import tempfile
 from typing import Mapping, Optional, Tuple
-import unicodedata
 
 from agent_rails.adapters.claude import (
     ClaudeAdapterError,
@@ -26,11 +25,15 @@ from agent_rails.adapters.claude import (
 from agent_rails.config.profile import ProfileLoadError
 from agent_rails.config.target_project import (
     TargetProjectContext,
+    TargetProjectContextMismatch,
     TargetProjectError,
-    resolve_project_root_identity,
     resolve_target_project,
+    validate_target_project_context,
 )
-from agent_rails.core.paths import AgentRailsPaths, canonical_path
+from agent_rails.core.terminal import (
+    render_line_events as _render_events,
+    terminal_literal as _terminal_literal,
+)
 from agent_rails.git._runner import run_git
 from agent_rails.memory.online import OnlineMemoryError, OnlineMemoryQuery, query_online_memory
 from agent_rails.models.presets import resolve_model
@@ -462,43 +465,18 @@ def _validate_pre_resolved_context(
 ) -> None:
     """Reject a context that was resolved for a different invocation."""
 
-    if not isinstance(context, TargetProjectContext):
-        raise DoctorInputError("Doctor context must be a TargetProjectContext.")
-    if not isinstance(context.root, Path) or not isinstance(
-        context.profile_path, str
-    ):
-        raise DoctorInputError(
-            "Doctor context has invalid project or Profile fields."
+    try:
+        validate_target_project_context(
+            context,
+            requested_project=request.requested_project,
+            kit_home=kit_home,
+            explicit_profile=request.explicit_profile,
+            environment=environment,
         )
-    requested_root, _ = resolve_project_root_identity(
-        request.requested_project, environment
-    )
-    if canonical_path(context.root) != requested_root:
-        raise DoctorInputError(
-            "Doctor context does not match the requested project."
-        )
-    expected_profile = AgentRailsPaths.from_environment(
-        kit_home, environment
-    ).resolve_profile(
-        requested_root,
-        requested_root.name,
-        request.explicit_profile,
-    )
-    if _canonical_profile_path(context.profile_path) != _canonical_profile_path(
-        expected_profile
-    ):
-        raise DoctorInputError(
-            "Doctor context does not match the requested Profile or kit."
-        )
-    resolved_kit = context.profile_environment.get("AGENT_RAILS_HOME", "")
-    if resolved_kit and canonical_path(Path(resolved_kit)) != kit_home:
-        raise DoctorInputError(
-            "Doctor context does not match the requested Profile or kit."
-        )
-
-
-def _canonical_profile_path(value: str) -> Path:
-    return canonical_path(Path(os.path.abspath(value)))
+    except TargetProjectContextMismatch as exc:
+        raise DoctorInputError(exc.message("Doctor")) from exc
+    except TargetProjectError as exc:
+        raise DoctorInputError(str(exc)) from exc
 
 
 def _check_manifest(
@@ -948,35 +926,3 @@ def _environment_path(value: str, home: str) -> Path:
             raise DoctorError("HOME is required to expand a Claude path.")
         value = home if value == "~" else str(Path(home) / value[2:])
     return Path(os.path.abspath(value))
-
-
-def _terminal_literal(value: str) -> str:
-    escaped = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append("\\n")
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif codepoint == 27:
-            escaped.append("\\x1b")
-        elif codepoint < 32 or codepoint == 127:
-            escaped.append(f"\\x{codepoint:02x}")
-        elif category in {"Cf", "Zl", "Zp"} or 0xD800 <= codepoint <= 0xDFFF:
-            if codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
-
-
-def _render_events(
-    events: Tuple[DoctorEvent, ...], stream: DoctorEventStream
-) -> str:
-    selected = [event.text for event in events if event.stream is stream]
-    return "" if not selected else "\n".join(selected) + "\n"

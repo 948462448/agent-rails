@@ -15,6 +15,7 @@ from agent_rails.context.change_evidence import (
     truncate_complete_lines,
 )
 from agent_rails.context.markdown import markdown_code, markdown_fence, valid_utf8
+from agent_rails.core.terminal import normalize_line_boundaries
 from agent_rails.memory.online import (
     OnlineMemoryError,
     OnlineMemoryQuery,
@@ -28,19 +29,6 @@ _TOP_LEVEL_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*[ \t]*:")
 _TRIGGER_ITEM = re.compile(r"^[ \t]*-[ \t]+(.*)$")
 _SINGLE_QUOTED = re.compile(r"^'((?:[^']|'')*)'(?:[ \t]+#.*)?$")
 _DOUBLE_QUOTED = re.compile(r'^("(?:[^"\\]|\\.)*")(?:[ \t]+#.*)?$')
-_LINE_BOUNDARIES = (
-    "\r\n",
-    "\n",
-    "\r",
-    "\v",
-    "\f",
-    "\x1c",
-    "\x1d",
-    "\x1e",
-    "\x85",
-    "\u2028",
-    "\u2029",
-)
 
 
 class MemoryEvidenceError(RuntimeError):
@@ -258,7 +246,7 @@ def _collect_online_text(request: MemoryEvidenceRequest) -> tuple[str, str]:
 
     if not raw_text.strip():
         return "", "Online memory query returned no cards."
-    safe_text = _redact_or_none(_normalize_line_boundaries(raw_text))
+    safe_text = _redact_or_none(normalize_line_boundaries(raw_text))
     if safe_text is None:
         return "", "Online memory output omitted: sensitive-output guard failed."
     return safe_text, "Online memory query OK."
@@ -319,7 +307,7 @@ def _read_regular_text(path: Path) -> Optional[str]:
         return None
     finally:
         os.close(descriptor)
-    return _normalize_line_boundaries(data.decode("utf-8", errors="replace"))
+    return normalize_line_boundaries(data.decode("utf-8", errors="replace"))
 
 
 def _memory_haystack(goal: str, changed_paths: Tuple[str, ...]) -> str:
@@ -405,15 +393,3 @@ def _indent_markdown(text: str) -> str:
 
 def _one_display_line(text: str) -> str:
     return valid_utf8(text).replace("\r", "\\r").replace("\n", "\\n")
-
-
-def _normalize_line_boundaries(text: str) -> str:
-    normalized = []
-    for line in text.splitlines(keepends=True):
-        for boundary in _LINE_BOUNDARIES:
-            if line.endswith(boundary):
-                normalized.append(line[: -len(boundary)] + "\n")
-                break
-        else:
-            normalized.append(line)
-    return "".join(normalized)

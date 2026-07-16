@@ -7,13 +7,17 @@ from enum import Enum
 import os
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, TextIO, Tuple
-import unicodedata
 
 from agent_rails.config.profile import ProfileLoadError
 from agent_rails.config.target_project import (
     TargetProjectContext,
     TargetProjectError,
     resolve_target_project,
+)
+from agent_rails.core.terminal import (
+    render_chunk_events as _render_events,
+    terminal_literal as _terminal_literal,
+    terminal_stream_text as _terminal_text,
 )
 from agent_rails.git.scope import (
     GitScopeError,
@@ -473,36 +477,3 @@ def _absolute_directory(path: Path, label: str) -> Path:
             f"{label} not found: {_terminal_literal(str(path))}"
         )
     return absolute
-
-
-def _terminal_text(value: str) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append(character)
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif category in {"Cc", "Cf", "Zl", "Zp"} or 0xD800 <= codepoint <= 0xDFFF:
-            if codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
-
-
-def _terminal_literal(value: str) -> str:
-    return _terminal_text(value).replace("\n", "\\n")
-
-
-def _render_events(
-    events: Tuple[VerifyEvent, ...], stream: VerifyEventStream
-) -> str:
-    return "".join(event.text for event in events if event.stream is stream)

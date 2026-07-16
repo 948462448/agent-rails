@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import os
 from pathlib import Path
 import subprocess
@@ -14,7 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "src"))
 
-from agent_rails.config.target_project import resolve_target_project
+from agent_rails.config.target_project import (
+    TargetProjectContextMismatch,
+    resolve_target_project,
+    validate_target_project_context,
+)
 from agent_rails.core.paths import AgentRailsPaths, project_worktree_slug
 
 
@@ -86,6 +91,54 @@ class PathsTest(unittest.TestCase):
 
 
 class TargetProjectContextTest(unittest.TestCase):
+    def test_pre_resolved_context_validation_owns_shared_invariants(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-context-validation-") as temp_dir:
+            temp = Path(temp_dir)
+            project = temp / "project"
+            project.mkdir()
+            environment = {"HOME": str(temp / "home")}
+            context = resolve_target_project(
+                project,
+                kit_home=ROOT,
+                environment=environment,
+                load_profile=False,
+            )
+
+            validate_target_project_context(
+                context,
+                requested_project=project,
+                kit_home=ROOT,
+                explicit_profile=None,
+                environment=environment,
+            )
+
+            mismatches = (
+                (replace(context, root=temp / "other"), "project"),
+                (replace(context, profile_path=str(temp / "other.profile")), "profile"),
+                (
+                    replace(
+                        context,
+                        profile_environment={"AGENT_RAILS_HOME": str(temp / "other-kit")},
+                    ),
+                    "kit",
+                ),
+                (replace(context, is_git_repo=True), "project"),
+            )
+            for supplied, reason in mismatches:
+                with self.subTest(reason=reason), self.assertRaises(
+                    TargetProjectContextMismatch
+                ) as raised:
+                    validate_target_project_context(
+                        supplied,
+                        requested_project=project,
+                        kit_home=ROOT,
+                        explicit_profile=None,
+                        environment=environment,
+                        match_git_identity=reason == "project" and supplied.is_git_repo,
+                    )
+                self.assertEqual(raised.exception.reason, reason)
+                self.assertIn("context does not match", raised.exception.message("Check"))
+
     def test_profile_and_env_file_execute_from_canonical_project_root(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-profile-cwd-") as temp_dir:
             temp = Path(temp_dir)

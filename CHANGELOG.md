@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 - 2026-07-16
 
 - Started the Shell-to-Python migration with a standard-library `src/agent_rails` package: `agent-rails estimate` now runs through Python Model Preset, Tokenizer, and rendering Modules while its Compatibility Shell only loads the existing Profile and forwards arguments.
 - Reused the Python Tokenizer Interface from the Context Budget Assembler, added direct Python unit coverage for tokenizer failover/cache behavior, and preserved the estimate CLI's profile, input, output, and error contracts through black-box tests.
@@ -46,8 +46,9 @@
 - Removed all 17 public-command Compatibility Shells after the Python dispatcher gained direct isolated-helper routing, then removed the Release Builder Shell and switched CI/tests to its Python entrypoint. Production Shell is now 47 lines across only the symlink-aware CLI, SessionStart host wrappers, and cold-start installer: 7,378 lines (99.4%) below the 7,425-line baseline.
 - Hardened SessionStart Profile rendering against Unicode control/format/line/paragraph separators while preserving byte-exact shell-path round trips, and made Skills install retain a private recovery transaction whenever publication rollback cannot restore the user's previous tree.
 - Removed Update's final Python-to-Shell-to-Python routes: Release updates now invoke the standalone installer directly, project refreshes enter the trusted Python public dispatcher while retaining stable dry-run text, and post-upgrade continuation re-execs the physical installed Python helper with a private umask.
-
-## 0.6.1 - 2026-07-15
+- Deepened the Python runtime with shared Terminal Output, Adapter Output, Child Process, Target Project Context validation, local Git exclude resolution, and file-stability Modules, reducing exact cross-file clone coverage from 11.30% to 4.46% without widening tool-specific lifecycle Interfaces.
+- Added Related Test Selection so each refactor slice can run the smallest safe core, adapters, workflows, or context suite while retaining the 172-entry full pre-delivery gate.
+- Verified the final Python-first runtime with all 172 regression entries, deterministic Release asset construction, checksum validation, isolated cold-start installation, and a real OpenCode install/uninstall/reinstall/update/doctor/Task Pack smoke in a clean Target Project.
 
 - Added hard token-budget Task Pack assembly with required-section floors, weighted category allocation, unused-share redistribution, exact external/Hugging Face tokenizer support, and a cached long-lived counting service.
 - Replaced OpenCode's static instruction-only integration with a project-local per-request plugin that reads the current session, derives available input space from `model.limit`, and injects a proportional Agent Rails Pack without trimming OpenCode history.

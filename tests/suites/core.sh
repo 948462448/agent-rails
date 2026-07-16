@@ -785,6 +785,29 @@ test_setup_project_mode_reaches_opencode() {
   assert_not_contains "$output" "Would ensure local ignore entries"
 }
 
+test_test_runner_selects_related_suites() {
+  local output
+
+  output="$(bash "$ROOT_DIR/tests/run.sh" --list-related \
+    src/agent_rails/core/terminal.py)"
+  assert_contains "$output" "core"
+  assert_contains "$output" "adapters"
+  assert_contains "$output" "workflows"
+  assert_contains "$output" "context"
+
+  output="$(bash "$ROOT_DIR/tests/run.sh" --list-related \
+    src/agent_rails/context/pack_renderer.py \
+    src/agent_rails/adapters/claude.py)"
+  [[ "$output" == $'adapters\ncontext' ]]
+
+  output="$(bash "$ROOT_DIR/tests/run.sh" --list-related \
+    src/agent_rails/config/target_project.py)"
+  [[ "$output" == $'core\nadapters\nworkflows\ncontext' ]]
+
+  output="$(bash "$ROOT_DIR/tests/run.sh" --list-related README.md)"
+  [[ -z "$output" ]]
+}
+
 test_setup_uses_python_target_context() {
   local repo="$TMP_ROOT/setup-python-target-context"
   local other_repo="$TMP_ROOT/setup-python-target-context-other"
@@ -873,6 +896,7 @@ test_setup_uses_python_target_context() {
 }
 
 run_core_tests() {
+  run_test test_test_runner_selects_related_suites "test runner selects related module suites"
   run_test test_init_prints_shell_setup "init prints shell setup"
   run_test test_init_without_project_stays_project_neutral "init stays project-neutral by default"
   run_test test_python_init_application_module "Python Init Application"

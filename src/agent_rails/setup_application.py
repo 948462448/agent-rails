@@ -9,7 +9,6 @@ from pathlib import Path
 import shlex
 import shutil
 from typing import Mapping, Optional, Tuple
-import unicodedata
 
 from agent_rails.adapters.claude import (
     CLAUDE_PROFILE_VARIABLES,
@@ -41,6 +40,10 @@ from agent_rails.config.target_project import (
     TargetProjectContext,
     TargetProjectError,
     resolve_target_project,
+)
+from agent_rails.core.terminal import (
+    render_line_events as _render_events,
+    terminal_literal as _terminal_literal,
 )
 from agent_rails.diagnostics.doctor import (
     DoctorError,
@@ -611,33 +614,3 @@ def _canonical_directory(
 
 def _stdout(events: list[SetupEvent], text: str = "") -> None:
     events.append(SetupEvent(SetupEventStream.STDOUT, _terminal_literal(text)))
-
-
-def _terminal_literal(value: str) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append("\\n")
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif category in {"Cc", "Cf", "Zl", "Zp"} or 0xD800 <= codepoint <= 0xDFFF:
-            if codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
-
-
-def _render_events(
-    events: Tuple[SetupEvent, ...], stream: SetupEventStream
-) -> str:
-    selected = [event.text for event in events if event.stream is stream]
-    return "" if not selected else "\n".join(selected) + "\n"

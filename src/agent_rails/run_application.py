@@ -7,10 +7,13 @@ from enum import Enum
 import os
 from pathlib import Path
 from typing import Mapping, Optional, Tuple
-import unicodedata
 
 from agent_rails.config.profile import ProfileLoadError
 from agent_rails.config.target_project import TargetProjectError, resolve_target_project
+from agent_rails.core.terminal import (
+    render_line_events as _render_events,
+    terminal_literal as _terminal_literal,
+)
 from agent_rails.context.pack_application import (
     PackApplicationError,
     PackApplicationRequest,
@@ -651,31 +654,3 @@ def _stdout(events: list[RunEvent], text: str = "") -> None:
 def _stdout_text(events: list[RunEvent], text: str) -> None:
     for line in text.splitlines():
         _stdout(events, line)
-
-
-def _terminal_literal(value: str) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if character == "\n":
-            escaped.append("\\n")
-        elif character == "\r":
-            escaped.append("\\r")
-        elif character == "\t":
-            escaped.append("\\t")
-        elif category in {"Cc", "Cf", "Zl", "Zp"} or 0xD800 <= codepoint <= 0xDFFF:
-            if codepoint <= 0xFF:
-                escaped.append(f"\\x{codepoint:02x}")
-            elif codepoint <= 0xFFFF:
-                escaped.append(f"\\u{codepoint:04x}")
-            else:
-                escaped.append(f"\\U{codepoint:08x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
-
-
-def _render_events(events: Tuple[RunEvent, ...], stream: RunEventStream) -> str:
-    selected = [event.text for event in events if event.stream is stream]
-    return "" if not selected else "\n".join(selected) + "\n"

@@ -9,6 +9,8 @@ import subprocess
 from typing import Any, Mapping, Optional, Sequence, Tuple
 import unicodedata
 
+from agent_rails.core.paths import same_file_metadata
+
 from ._runner import run_git
 
 
@@ -358,7 +360,7 @@ def _fingerprint_regular_file(
     descriptor = os.open(path, flags)
     try:
         opened = os.fstat(descriptor)
-        if not _same_file_metadata(metadata, opened):
+        if not same_file_metadata(metadata, opened):
             raise GitScopeError(f"Worktree path moved while fingerprinting: {path}")
         file_digest = hashlib.sha256()
         use_full_content = (
@@ -397,30 +399,12 @@ def _fingerprint_regular_file(
             else:
                 mode = b"metadata-only"
         closed = os.fstat(descriptor)
-        if not _same_file_metadata(opened, closed):
+        if not same_file_metadata(opened, closed):
             raise GitScopeError(f"Worktree path moved while fingerprinting: {path}")
     finally:
         os.close(descriptor)
     _update_fingerprint(digest, b"worktree-content-mode", mode)
     _update_fingerprint(digest, b"worktree-content-sha256", file_digest.digest())
-
-
-def _same_file_metadata(left: os.stat_result, right: os.stat_result) -> bool:
-    return (
-        left.st_mode,
-        left.st_size,
-        left.st_mtime_ns,
-        left.st_ctime_ns,
-        left.st_dev,
-        left.st_ino,
-    ) == (
-        right.st_mode,
-        right.st_size,
-        right.st_mtime_ns,
-        right.st_ctime_ns,
-        right.st_dev,
-        right.st_ino,
-    )
 
 
 def _update_fingerprint(digest: Any, label: bytes, value: bytes) -> None:

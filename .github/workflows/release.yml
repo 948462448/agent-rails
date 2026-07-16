@@ -34,6 +34,13 @@ jobs:
             exit 1
           fi
 
+      - name: Install test shell dependencies
+        run: |
+          if ! command -v zsh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes zsh
+          fi
+
       - name: Run test suite
         run: bash tests/run.sh
 

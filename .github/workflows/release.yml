@@ -22,11 +22,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" HEAD; then
-            printf 'Release commit %s is not contained in main.\n' "$GITHUB_SHA" >&2
+          release_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          if ! git merge-base --is-ancestor "$release_commit" HEAD; then
+            printf 'Release commit %s is not contained in main.\n' "$release_commit" >&2
             exit 1
           fi
-          git checkout --detach "$GITHUB_SHA"
+          git checkout --detach "$release_commit"
           version="$(awk 'NF { print $1; exit }' VERSION)"
           if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
             printf 'Tag %s does not match VERSION %s.\n' "$GITHUB_REF_NAME" "$version" >&2

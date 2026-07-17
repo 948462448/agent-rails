@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 import re
+import subprocess
 from typing import Optional, Tuple
 
-from agent_rails.git._runner import run_git
+from agent_rails.core.process import stop_process_group
+from agent_rails.git._runner import isolated_git_environment, run_git
 
 
 STOP_WORDS = frozenset(
@@ -59,6 +61,8 @@ _SYMBOL_PATTERNS = (
 )
 _BLOB_MAX_BYTES = 262_144
 _SEARCH_FILE_LIMIT = 512
+_SEARCH_OUTPUT_MAX_BYTES = 2_097_152
+_SEARCH_READ_CHUNK_BYTES = 4_096
 _PATHSPECS = tuple(f"*{suffix}" for suffix in _SEARCH_SUFFIXES)
 
 
@@ -207,26 +211,73 @@ def _content_paths(
     for token in tokens:
         arguments.extend(("-e", token))
     arguments.extend((request.target_sha, "--", *_PATHSPECS))
-    try:
-        result = run_git(request.project, tuple(arguments))
-    except OSError as exc:
-        raise CodeEvidenceError("Git command is unavailable.") from exc
-    if result.returncode == 1:
-        return set()
-    if result.returncode != 0:
-        raise CodeEvidenceError("Unable to search tracked code.")
-
+    process = None
+    stream = None
     prefix = f"{request.target_sha}:"
     matches = set()
-    for value in result.stdout.split("\0"):
-        if not value:
-            continue
-        path = value[len(prefix) :] if value.startswith(prefix) else value
-        if _is_code_path(path):
-            matches.add(path)
-        if len(matches) >= _SEARCH_FILE_LIMIT:
-            break
-    return matches
+    pending = bytearray()
+    output_bytes = 0
+    running = False
+    try:
+        process = subprocess.Popen(
+            ["git", "-C", str(request.project), *arguments],
+            env=isolated_git_environment(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+            start_new_session=True,
+        )
+        running = True
+        stream = process.stdout
+        if stream is None:
+            raise CodeEvidenceError("Git search output is unavailable.")
+        while True:
+            chunk = stream.read(_SEARCH_READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            output_bytes += len(chunk)
+            if output_bytes > _SEARCH_OUTPUT_MAX_BYTES:
+                raise CodeEvidenceError("Tracked code search output exceeds safe limit.")
+            pending.extend(chunk)
+            while True:
+                separator = pending.find(b"\0")
+                if separator < 0:
+                    break
+                value = bytes(pending[:separator]).decode(
+                    "utf-8", errors="surrogateescape"
+                )
+                del pending[: separator + 1]
+                path = value[len(prefix) :] if value.startswith(prefix) else value
+                if path and _is_code_path(path):
+                    matches.add(path)
+                if len(matches) >= _SEARCH_FILE_LIMIT:
+                    stop_process_group(process)
+                    running = False
+                    return matches
+        stream.close()
+        stream = None
+        returncode = process.wait()
+        running = False
+        if returncode == 1:
+            return set()
+        if returncode != 0:
+            raise CodeEvidenceError("Unable to search tracked code.")
+        return matches
+    except CodeEvidenceError:
+        if process is not None and running:
+            stop_process_group(process)
+        raise
+    except OSError as exc:
+        if process is not None and running:
+            stop_process_group(process)
+        raise CodeEvidenceError("Git command is unavailable.") from exc
+    finally:
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
 
 
 def _score_path(

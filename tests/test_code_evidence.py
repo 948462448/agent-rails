@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,22 @@ from agent_rails.evidence.code import (  # noqa: E402
     collect_code_evidence,
     select_code_tokens,
 )
+from agent_rails.evidence import code as code_module  # noqa: E402
+
+
+class TrackingStream:
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+        self.offset = 0
+        self.closed = False
+
+    def read(self, size: int) -> bytes:
+        chunk = self.payload[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class CodeEvidenceTest(unittest.TestCase):
@@ -156,6 +173,52 @@ class CodeEvidenceTest(unittest.TestCase):
         self.assertNotIn("agent-rails", tokens)
         self.assertIn("登录", tokens)
         self.assertIn("校验", tokens)
+
+    def test_git_search_stops_reading_after_bounded_path_count(self) -> None:
+        payload = b"".join(
+            f"target:src/session_{index:04d}.py\0".encode("utf-8")
+            for index in range(2_000)
+        )
+        stream = TrackingStream(payload)
+        process = Mock(stdout=stream)
+        process.wait.return_value = 0
+        request = CodeEvidenceRequest(
+            project=Path("/unused"),
+            target_sha="target",
+            query="session",
+        )
+
+        with (
+            patch.object(code_module.subprocess, "Popen", return_value=process),
+            patch.object(code_module, "stop_process_group") as stop,
+        ):
+            matches = code_module._content_paths(request, ("session",))
+
+        self.assertEqual(len(matches), 512)
+        self.assertLess(stream.offset, len(payload))
+        self.assertTrue(stream.closed)
+        stop.assert_called_once_with(process)
+
+    def test_git_search_rejects_oversized_unframed_output(self) -> None:
+        stream = TrackingStream(
+            b"x" * (code_module._SEARCH_OUTPUT_MAX_BYTES + 1)
+        )
+        process = Mock(stdout=stream)
+        request = CodeEvidenceRequest(
+            project=Path("/unused"),
+            target_sha="target",
+            query="session",
+        )
+
+        with (
+            patch.object(code_module.subprocess, "Popen", return_value=process),
+            patch.object(code_module, "stop_process_group") as stop,
+            self.assertRaisesRegex(CodeEvidenceError, "exceeds safe limit"),
+        ):
+            code_module._content_paths(request, ("session",))
+
+        self.assertTrue(stream.closed)
+        stop.assert_called_once_with(process)
 
     def test_invalid_target_is_reported_as_module_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-code-missing-") as temp_dir:

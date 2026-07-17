@@ -258,6 +258,8 @@ def run_verify(
                     RepairPackRequest(
                         failure=check_execution.failure,
                         changed_paths=prepared.changed_paths,
+                        project=prepared.project_root,
+                        target_sha=prepared.target_sha or "",
                     )
                 )
             )

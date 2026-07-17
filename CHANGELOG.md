@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Extracted one fixed-snapshot Code Evidence Module shared by clean Task Packs and Repair Packs; failed verification can now re-retrieve a bounded set of related tracked source, symbol, and test locations without reading worktree-only content or changing the original exit semantics.
 - Added the first P1 Repair Pack tracer bullet: failed `agent-rails verify` steps now retain bounded complete-line evidence and append a redacted, terminal-safe diagnostic summary without changing live output, exit status, or publish short-circuit behavior.
 - Started the developer-first coding-agent roadmap with bounded Task Code Evidence: a clean Target Project snapshot can now use literal Goal terms to select relevant tracked files, lightweight symbols, and tests without adding a public command, third-party dependency, or source-body expansion.
 - Added a durable coding-agent evolution document that records the GitHub research, product boundary, retrieval/repair/decomposition/model-routing roadmap, Memory role, non-goals, and paired evaluation gates.

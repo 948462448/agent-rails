@@ -877,6 +877,12 @@ test_python_change_evidence_module() {
     python3 "$ROOT_DIR/tests/test_change_evidence.py"
 }
 
+test_python_code_evidence_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_code_evidence.py"
+}
+
 test_python_memory_evidence_module() {
   (
     cd "$ROOT_DIR"
@@ -1433,6 +1439,7 @@ run_context_tests() {
   run_test test_context_assembler_server_caches_token_counts "context assembler server caches token counts"
   run_test test_python_context_assembler_module "Python Context Budget Assembler module"
   run_test test_python_pack_policy_module "Python Task Pack Policy module"
+  run_test test_python_code_evidence_module "Python shared Code Evidence module"
   run_test test_python_change_evidence_module "Python Task Pack Change Evidence module"
   run_test test_python_memory_evidence_module "Python Task Pack Memory Evidence module"
   run_test test_python_project_docs_module "Python Task Pack Project Docs module"

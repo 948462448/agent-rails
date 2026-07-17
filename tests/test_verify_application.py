@@ -411,6 +411,9 @@ class VerifyApplicationTest(unittest.TestCase):
         prepared = Mock(
             name="prepared-check",
             changed_paths=("runtime/module.py",),
+            project_root=self.project,
+            scope=None,
+            target_sha=None,
         )
         publish = Mock(side_effect=AssertionError("failed Check invoked Publish"))
 

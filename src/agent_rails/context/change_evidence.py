@@ -11,6 +11,19 @@ import tempfile
 from typing import Optional, Sequence, Tuple
 
 from agent_rails.context.markdown import markdown_code, markdown_fence, valid_utf8
+from agent_rails.evidence.code import (
+    BINARY_SUFFIXES as _BINARY_SUFFIXES,
+    BUILD_CONFIG as _BUILD_CONFIG,
+    CODE_SUFFIX as _CODE_SUFFIX,
+    ENTRY_DOC as _ENTRY_DOC,
+    TEST_FILE as _TEST_FILE,
+    TEST_PATH as _TEST_PATH,
+    CodeEvidenceError,
+    CodeEvidenceRecord as TaskCodeRecord,
+    CodeEvidenceRequest,
+    collect_code_evidence,
+    select_code_tokens,
+)
 from agent_rails.git._runner import run_git
 from agent_rails.git.scope import (
     GitScope,
@@ -23,94 +36,6 @@ from agent_rails.security.sensitive_output import (
     SensitiveOutputError,
     redact_sensitive_output,
 )
-
-
-_STOP_WORDS = frozenset(
-    "agent agents rails task pack project repo code change changes work continue "
-    "continuing optimize optimization reduce reducing keep keeping with without "
-    "from into this that".split()
-)
-_BINARY_SUFFIXES = (
-    ".bmp",
-    ".gif",
-    ".ico",
-    ".jpeg",
-    ".jpg",
-    ".pdf",
-    ".png",
-    ".webp",
-    ".avif",
-    ".heic",
-    ".mp3",
-    ".mp4",
-    ".mov",
-    ".ttf",
-    ".woff",
-    ".woff2",
-    ".zip",
-    ".gz",
-    ".tgz",
-    ".bz2",
-    ".xz",
-    ".7z",
-    ".jar",
-    ".war",
-    ".class",
-    ".pyc",
-)
-_CODE_SUFFIX = re.compile(r"\.(sh|py|js|jsx|ts|tsx|java|kt|go|rs|mjs|cjs|rb|php|swift)$")
-_TEST_PATH = re.compile(r"(^|/)(test|tests|spec|specs)/")
-_TEST_FILE = re.compile(r"(test|spec)\.(sh|py|js|ts|tsx|jsx)$")
-_ENTRY_DOC = re.compile(r"(^|/)(agents|claude|readme|context)([-_.a-z0-9]*)?\.md$")
-_BUILD_CONFIG = re.compile(
-    r"(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|pom\.xml|"
-    r"build\.gradle|pyproject\.toml|requirements.*\.txt|go\.mod|cargo\.toml)$"
-)
-_TASK_SUFFIXES = (
-    ".sh", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt",
-    ".go", ".rs", ".mjs", ".cjs", ".rb", ".php", ".swift", ".md",
-    ".txt", ".toml", ".yaml", ".yml", ".json", ".xml", ".properties",
-    ".gradle", ".cfg", ".ini",
-)
-_CJK_RUN = re.compile(r"[\u3400-\u9fff]+")
-_CJK_STOP_PHRASES = (
-    "实现",
-    "修复",
-    "新增",
-    "增加",
-    "支持",
-    "优化",
-    "重构",
-    "减少",
-    "无关",
-    "代码",
-    "项目",
-    "任务",
-    "功能",
-    "问题",
-    "当前",
-    "进行",
-    "以及",
-)
-_SYMBOL_PATTERNS = (
-    re.compile(r"^\s*(?:async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)"),
-    re.compile(
-        r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
-        r"(?:function|class|interface|type|enum|record|struct|trait)\s+"
-        r"([A-Za-z_$][A-Za-z0-9_$]*)"
-    ),
-    re.compile(
-        r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?"
-        r"(?:fn|struct|enum|trait|impl)\s+([A-Za-z_][A-Za-z0-9_]*)"
-    ),
-    re.compile(
-        r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)"
-    ),
-    re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{"),
-)
-_TASK_BLOB_MAX_BYTES = 262_144
-_TASK_SEARCH_FILE_LIMIT = 512
-_TASK_PATHSPECS = tuple(f"*{suffix}" for suffix in _TASK_SUFFIXES)
 
 
 class ChangeEvidenceError(RuntimeError):
@@ -150,15 +75,6 @@ class FileExcerpt:
     path: str
     format_name: str
     text: str
-
-
-@dataclass(frozen=True)
-class TaskCodeRecord:
-    path: str
-    line: int
-    symbol: str
-    score: int
-    reasons: Tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -246,12 +162,18 @@ def collect_change_evidence(request: ChangeEvidenceRequest) -> ChangeEvidence:
             "Skipped because changed-path evidence is available for this task."
         )
     else:
-        task_code_records = collect_task_code_records(
-            request.project,
-            scope,
-            goal_tokens,
-            limit=request.policy.excerpt_limit,
-        )
+        try:
+            task_code_records = collect_code_evidence(
+                CodeEvidenceRequest(
+                    project=request.project,
+                    target_sha=scope.target_sha,
+                    query=request.goal,
+                    ignored_text=request.project_name,
+                    limit=request.policy.excerpt_limit,
+                )
+            )
+        except CodeEvidenceError as exc:
+            raise ChangeEvidenceError(str(exc)) from exc
         task_code_status = (
             ""
             if task_code_records
@@ -273,81 +195,8 @@ def collect_change_evidence(request: ChangeEvidenceRequest) -> ChangeEvidence:
 
 
 def select_goal_tokens(goal: str, project_name: str) -> Tuple[str, ...]:
-    ignored = set(_STOP_WORDS)
-    for token in re.split(r"[^0-9A-Za-z]+", project_name.casefold()):
-        if len(token) >= 3:
-            ignored.add(token)
-
-    selected = []
-    seen = set()
-    for token in re.split(r"[^0-9A-Za-z_.-]+", goal.casefold()):
-        if len(token) < 3 or token in ignored or token in seen:
-            continue
-        selected.append(token)
-        seen.add(token)
-        if len(selected) == 6:
-            break
-
-    cjk_goal = goal
-    for phrase in _CJK_STOP_PHRASES:
-        cjk_goal = cjk_goal.replace(phrase, " ")
-    for run in _CJK_RUN.findall(cjk_goal):
-        candidates = [run[index : index + 2] for index in range(len(run) - 1)]
-        if len(run) >= 2:
-            candidates.append(run)
-        for token in candidates:
-            if len(token) < 2 or token in seen:
-                continue
-            selected.append(token)
-            seen.add(token)
-            if len(selected) == 6:
-                return tuple(selected)
-    return tuple(selected)
-
-
-def collect_task_code_records(
-    project: Path,
-    scope: GitScope,
-    goal_tokens: Sequence[str],
-    *,
-    limit: int,
-) -> Tuple[TaskCodeRecord, ...]:
-    if limit <= 0 or not goal_tokens:
-        return ()
-
-    paths = _tracked_task_paths(project, scope)
-    content_paths = _task_content_paths(project, scope, goal_tokens)
-    ranked = []
-    for path in paths:
-        record = _score_task_path(
-            path,
-            goal_tokens,
-            path in content_paths,
-        )
-        if record is not None:
-            ranked.append(record)
-    ranked.sort(key=lambda item: (item.score, item.path), reverse=True)
-
-    records = []
-    for ranked_path in ranked:
-        line, symbol = _task_location(
-            project,
-            scope,
-            ranked_path.path,
-            goal_tokens,
-        )
-        records.append(
-            TaskCodeRecord(
-                path=ranked_path.path,
-                line=line,
-                symbol=symbol,
-                score=ranked_path.score,
-                reasons=ranked_path.reasons,
-            )
-        )
-        if len(records) >= limit:
-            break
-    return tuple(records)
+    """Compatibility wrapper for the Task Pack token selector."""
+    return select_code_tokens(goal, project_name)
 
 
 def rank_changed_paths(
@@ -656,182 +505,6 @@ def _content_matches_by_path(
             if path in matched_paths and len(matches[path]) < 2:
                 matches[path].append(token)
     return {path: tuple(tokens) for path, tokens in matches.items() if tokens}
-
-
-def _tracked_task_paths(project: Path, scope: GitScope) -> Tuple[str, ...]:
-    try:
-        result = run_git(
-            project,
-            ("ls-tree", "-r", "-z", "--name-only", scope.target_sha, "--"),
-        )
-    except OSError as exc:
-        raise ChangeEvidenceError("Git command is unavailable.") from exc
-    if result.returncode != 0:
-        raise ChangeEvidenceError("Unable to list tracked task code paths.")
-    return tuple(
-        path
-        for path in result.stdout.split("\0")
-        if path and _is_task_code_path(path)
-    )
-
-
-def _task_content_paths(
-    project: Path,
-    scope: GitScope,
-    goal_tokens: Sequence[str],
-) -> set[str]:
-    arguments = ["grep", "-l", "-z", "-I", "-i", "-F"]
-    for token in goal_tokens:
-        arguments.extend(("-e", token))
-    arguments.extend((scope.target_sha, "--", *_TASK_PATHSPECS))
-    prefix = f"{scope.target_sha}:"
-    try:
-        result = run_git(project, tuple(arguments))
-    except OSError as exc:
-        raise ChangeEvidenceError("Git command is unavailable.") from exc
-    if result.returncode == 1:
-        return set()
-    if result.returncode != 0:
-        raise ChangeEvidenceError("Unable to search tracked task code.")
-
-    matches = set()
-    for value in result.stdout.split("\0"):
-        if not value:
-            continue
-        path = value[len(prefix) :] if value.startswith(prefix) else value
-        if _is_task_code_path(path):
-            matches.add(path)
-        if len(matches) >= _TASK_SEARCH_FILE_LIMIT:
-            break
-    return matches
-
-
-def _score_task_path(
-    path: str,
-    goal_tokens: Sequence[str],
-    content_match: bool,
-) -> Optional[RankedPath]:
-    lowered = path.casefold()
-    score = 0
-    reasons = []
-    for token in goal_tokens:
-        if token.casefold() in lowered:
-            score += 80
-            reasons.append(f"path:{token}")
-    if content_match:
-        score += 45
-        reasons.append("content")
-    if not reasons:
-        return None
-    if lowered.startswith(("src/", "lib/", "app/", "backend/", "frontend/", "runtime/")):
-        score += 35
-        reasons.append("source")
-    if _CODE_SUFFIX.search(lowered):
-        score += 40
-        reasons.append("code")
-    if _TEST_PATH.search(lowered) or _TEST_FILE.search(lowered):
-        score += 25
-        reasons.append("tests")
-    if _ENTRY_DOC.search(lowered):
-        score += 15
-        reasons.append("entry-doc")
-    if _BUILD_CONFIG.search(lowered):
-        score += 15
-        reasons.append("build-config")
-    return RankedPath(path, score, tuple(reasons))
-
-
-def _task_location(
-    project: Path,
-    scope: GitScope,
-    path: str,
-    goal_tokens: Sequence[str],
-) -> tuple[int, str]:
-    text = _read_git_blob_text(project, scope, path)
-    if text is None:
-        return 0, ""
-    lines = text.splitlines()
-    symbols = []
-    matched_lines = []
-    folded_tokens = tuple(token.casefold() for token in goal_tokens)
-    for line_number, line in enumerate(lines, start=1):
-        folded = line.casefold()
-        if any(token in folded for token in folded_tokens):
-            matched_lines.append(line_number)
-        for pattern in _SYMBOL_PATTERNS:
-            matched = pattern.match(line)
-            if matched:
-                symbols.append((line_number, matched.group(1)))
-                break
-
-    best_symbol = max(
-        (
-            (
-                sum(token in symbol.casefold() for token in folded_tokens),
-                -line_number,
-                line_number,
-                symbol,
-            )
-            for line_number, symbol in symbols
-        ),
-        default=(0, 0, 0, ""),
-    )
-    if best_symbol[0] > 0:
-        return best_symbol[2], best_symbol[3]
-    if matched_lines:
-        match_line = matched_lines[0]
-        preceding = [
-            (line_number, symbol)
-            for line_number, symbol in symbols
-            if line_number <= match_line
-        ]
-        if preceding:
-            return preceding[-1]
-        return match_line, ""
-    if symbols:
-        return symbols[0]
-    return 0, ""
-
-
-def _read_git_blob_text(
-    project: Path,
-    scope: GitScope,
-    path: str,
-) -> Optional[str]:
-    object_name = f"{scope.target_sha}:{path}"
-    try:
-        size_result = run_git(project, ("cat-file", "-s", object_name))
-    except OSError as exc:
-        raise ChangeEvidenceError("Git command is unavailable.") from exc
-    if size_result.returncode != 0:
-        return None
-    try:
-        size = int(size_result.stdout.strip())
-    except ValueError:
-        return None
-    if size > _TASK_BLOB_MAX_BYTES:
-        return None
-    try:
-        result = run_git(project, ("show", object_name))
-    except OSError as exc:
-        raise ChangeEvidenceError("Git command is unavailable.") from exc
-    if result.returncode != 0 or "\0" in result.stdout[:8192]:
-        return None
-    return result.stdout
-
-
-def _is_task_code_path(path: str) -> bool:
-    lowered = path.casefold()
-    if lowered.endswith(_BINARY_SUFFIXES):
-        return False
-    return bool(
-        _CODE_SUFFIX.search(lowered)
-        or _TEST_PATH.search(lowered)
-        or _TEST_FILE.search(lowered)
-        or _ENTRY_DOC.search(lowered)
-        or _BUILD_CONFIG.search(lowered)
-        or lowered.endswith(_TASK_SUFFIXES)
-    )
 
 
 def _case_insensitive_git_regex(token: str) -> str:

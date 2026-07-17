@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import re
-from typing import Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 from agent_rails.core.terminal import terminal_literal, terminal_stream_text
+from agent_rails.evidence.code import (
+    CodeEvidenceError,
+    CodeEvidenceRecord,
+    CodeEvidenceRequest,
+    collect_code_evidence,
+)
 from agent_rails.security.sensitive_output import (
     SensitiveOutputError,
     redact_sensitive_output,
@@ -20,6 +27,10 @@ _HIGH_VALUE = re.compile(
 )
 _DEFAULT_MAX_CHARS = 4_000
 _MAX_LOCATIONS = 6
+_CODE_EVIDENCE_LIMIT = 4
+_DIAGNOSTIC_STOP_WORDS = (
+    "error errors failed failure exception traceback assertionerror expected actual"
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,8 @@ class RepairPackRequest:
     failure: VerificationFailure
     changed_paths: Tuple[str, ...]
     max_chars: int = _DEFAULT_MAX_CHARS
+    project: Optional[Path] = None
+    target_sha: str = ""
 
 
 def render_repair_pack(request: RepairPackRequest) -> str:
@@ -54,6 +67,25 @@ def render_repair_pack(request: RepairPackRequest) -> str:
     locations = _related_locations(
         (*stderr.splitlines(), *stdout.splitlines()), request.changed_paths
     )
+    code_records: Optional[Tuple[CodeEvidenceRecord, ...]] = None
+    code_unavailable = False
+    if request.project is not None and request.target_sha:
+        try:
+            code_records = collect_code_evidence(
+                CodeEvidenceRequest(
+                    project=request.project,
+                    target_sha=request.target_sha,
+                    query="\n".join((failure.reason, *excerpt)),
+                    ignored_text=(
+                        f"{request.project.name} {_DIAGNOSTIC_STOP_WORDS}"
+                    ),
+                    preferred_paths=request.changed_paths,
+                    limit=_CODE_EVIDENCE_LIMIT,
+                )
+            )
+        except CodeEvidenceError:
+            code_records = ()
+            code_unavailable = True
 
     output = [
         "\nRepair Pack\n",
@@ -75,6 +107,14 @@ def render_repair_pack(request: RepairPackRequest) -> str:
         output.extend(f"- {terminal_literal(location)}\n" for location in locations)
     else:
         output.append("none confirmed\n")
+    if code_records is not None:
+        if code_unavailable:
+            output.append("\nRelated code evidence: unavailable\n")
+        elif code_records:
+            output.append("\nRelated code evidence (fixed Git target):\n")
+            output.extend(_render_code_record(record) for record in code_records)
+        else:
+            output.append("\nRelated code evidence: no tracked match\n")
     output.extend(
         (
             "\nNext action:\n",
@@ -84,6 +124,12 @@ def render_repair_pack(request: RepairPackRequest) -> str:
         )
     )
     return _bounded("".join(output), request.max_chars)
+
+
+def _render_code_record(record: CodeEvidenceRecord) -> str:
+    location = record.path if record.line <= 0 else f"{record.path}:{record.line}"
+    symbol = f" symbol={terminal_literal(record.symbol)}" if record.symbol else ""
+    return f"- {terminal_literal(location)}{symbol}\n"
 
 
 def _safe_output(text: str) -> str:

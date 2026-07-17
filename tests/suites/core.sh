@@ -801,6 +801,10 @@ test_test_runner_selects_related_suites() {
   [[ "$output" == $'adapters\ncontext' ]]
 
   output="$(bash "$ROOT_DIR/tests/run.sh" --list-related \
+    src/agent_rails/evidence/code.py)"
+  [[ "$output" == $'workflows\ncontext' ]]
+
+  output="$(bash "$ROOT_DIR/tests/run.sh" --list-related \
     src/agent_rails/config/target_project.py)"
   [[ "$output" == $'core\nadapters\nworkflows\ncontext' ]]
 

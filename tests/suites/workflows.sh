@@ -316,14 +316,18 @@ test_verify_preserves_child_exit_and_partial_output() {
   local repo="$TMP_ROOT/verify-child-exit"
   local profile="$TMP_ROOT/verify-child-exit.profile"
   local output status
-  mkdir -p "$repo"
+  mkdir -p "$repo/src" "$repo/tests"
   git -C "$repo" init -q
   printf '# verify child exit\n' > "$repo/README.md"
-  git -C "$repo" add README.md
+  printf 'class SessionValidator:\n    def validate_cookie(self):\n        return False\n' \
+    > "$repo/src/session_validator.py"
+  printf 'def test_validate_cookie():\n    assert False\n' \
+    > "$repo/tests/test_session_validator.py"
+  git -C "$repo" add README.md src tests
   git_commit "$repo" init
   printf '\nchanged\n' >> "$repo/README.md"
   cat > "$profile" <<'PROFILE'
-VERIFY_PROJECT='printf "partial-verification-output\n"; exit 19'
+VERIFY_PROJECT='printf "partial-verification-output\nAssertionError: SessionValidator validate_cookie failed\n"; exit 19'
 PROFILE
 
   set +e
@@ -339,6 +343,9 @@ PROFILE
   assert_contains "$output" "Repair Pack"
   assert_contains "$output" "Exit code: 19"
   assert_contains "$output" "First diagnostic:"
+  assert_contains "$output" "Related code evidence"
+  assert_contains "$output" "src/session_validator.py"
+  assert_contains "$output" "tests/test_session_validator.py"
   assert_contains "$output" "Next action:"
   assert_not_contains "$output" "Publish readiness"
   assert_not_contains "$output" "verification complete"

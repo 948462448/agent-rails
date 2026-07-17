@@ -29,7 +29,7 @@ Usage: bash tests/run.sh [core|adapters|workflows|context ...]
        bash tests/run.sh --related [PATH ...]
        bash tests/run.sh --list-related [PATH ...]
 
-With no suite names, runs all 174 tests in their historical order.
+With no suite names, runs all 175 tests in their historical order.
 Related mode maps explicit paths, or current Git changes when no paths are
 given, to the smallest safe set of module suites.
 USAGE
@@ -60,6 +60,10 @@ select_related_path() {
       ;;
     src/agent_rails/adapters/*|src/agent_rails/diagnostics/*|src/agent_rails/session_start.py)
       related_adapters=1
+      ;;
+    src/agent_rails/evidence/*)
+      related_workflows=1
+      related_context=1
       ;;
     src/agent_rails/context/*|src/agent_rails/memory/*|src/agent_rails/core/private_text.py)
       related_context=1
@@ -102,6 +106,10 @@ select_related_path() {
       ;;
     tests/test_adapter_content.py|tests/test_adapter_workspace.py|tests/test_claude_adapter.py|tests/test_opencode_adapter.py|tests/test_doctor_application.py|tests/test_session_start.py)
       related_adapters=1
+      ;;
+    tests/test_code_evidence.py)
+      related_workflows=1
+      related_context=1
       ;;
     tests/test_context_assembler.py|tests/test_pack_*.py|tests/test_change_evidence.py|tests/test_memory_*.py|tests/test_project_docs.py|tests/test_contract_sections.py|tests/test_context_markdown.py|tests/test_private_text.py)
       related_context=1

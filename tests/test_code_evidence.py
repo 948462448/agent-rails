@@ -128,6 +128,25 @@ class CodeEvidenceTest(unittest.TestCase):
                 ),
             )
 
+            excluded = collect_code_evidence(
+                CodeEvidenceRequest(
+                    project=repo,
+                    target_sha=self.git(repo, "rev-parse", "HEAD"),
+                    query="session validator",
+                    preferred_paths=("src/session_validator.py",),
+                    excluded_paths=("src/session_validator.py",),
+                    limit=2,
+                )
+            )
+
+            self.assertEqual(
+                tuple(record.path for record in excluded),
+                (
+                    "src/session_validator_helper.py",
+                    "tests/test_session_validator.py",
+                ),
+            )
+
     def test_token_selection_supports_cjk_and_ignored_project_name(self) -> None:
         tokens = select_code_tokens(
             "修复登录校验并减少无关代码 agent-rails",

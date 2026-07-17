@@ -423,6 +423,30 @@ test_clean_pack_includes_task_code_evidence() {
   assert_file_not_contains "$output" "src/reporting.py"
 }
 
+test_dirty_pack_includes_untouched_code_evidence() {
+  local repo="$TMP_ROOT/pack-task-code-complement"
+  local output="$TMP_ROOT/pack-task-code-complement.md"
+  mkdir -p "$repo/src" "$repo/tests"
+  git -C "$repo" init -q
+  printf 'class SessionValidator:\n    pass\n' > "$repo/src/session_validator.py"
+  printf 'class SessionValidatorStore:\n    pass\n' > "$repo/src/session_store.py"
+  printf 'def test_session_validator():\n    assert True\n' \
+    > "$repo/tests/test_session_validator.py"
+  git -C "$repo" add src tests
+  git_commit "$repo" init
+  printf 'class SessionValidator:\n    changed = True\n' \
+    > "$repo/src/session_validator.py"
+
+  "$AGENT_RAILS_BIN" pack --project "$repo" --output "$output" --pack-mode lite \
+    "fix session validator" >/dev/null
+
+  assert_file_contains "$output" "## Changed File Excerpts"
+  assert_file_contains "$output" '+    changed = True'
+  assert_file_contains "$output" "## Task Code Evidence"
+  assert_file_contains "$output" '`src/session_store.py:1` role=implementation'
+  assert_file_contains "$output" '`tests/test_session_validator.py:1` role=verification'
+}
+
 test_pack_excerpts_prioritize_changed_hunks() {
   local repo="$TMP_ROOT/pack-diff-excerpts"
   local output="$TMP_ROOT/pack-diff-excerpts-task-pack.md"
@@ -1424,6 +1448,7 @@ run_context_tests() {
   run_test test_memory_suggest_uses_python_target_context_once "memory suggest uses Python Target Project Context once"
   run_test test_pack_includes_changed_file_excerpts "pack includes changed file excerpts"
   run_test test_clean_pack_includes_task_code_evidence "clean pack includes task code evidence"
+  run_test test_dirty_pack_includes_untouched_code_evidence "dirty pack includes untouched code evidence"
   run_test test_pack_excerpts_prioritize_changed_hunks "pack excerpts prioritize changed hunks"
   run_test test_pack_redacts_sensitive_changed_hunks "pack redacts sensitive changed hunks"
   run_test test_pack_truncation_preserves_utf8 "pack truncation preserves UTF-8"

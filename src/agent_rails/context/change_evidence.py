@@ -157,10 +157,28 @@ def collect_change_evidence(request: ChangeEvidenceRequest) -> ChangeEvidence:
         chars_per_file=request.policy.excerpt_chars,
     )
     if snapshot.changed_paths:
-        task_code_records = ()
-        task_code_status = (
-            "Skipped because changed-path evidence is available for this task."
-        )
+        try:
+            task_code_records = collect_code_evidence(
+                CodeEvidenceRequest(
+                    project=request.project,
+                    target_sha=scope.target_sha,
+                    query=request.goal,
+                    ignored_text=request.project_name,
+                    excluded_paths=snapshot.changed_paths,
+                    limit=min(2, request.policy.excerpt_limit),
+                )
+            )
+            task_code_status = (
+                ""
+                if task_code_records
+                else "No untouched task-relevant tracked code evidence matched the goal."
+            )
+        except CodeEvidenceError:
+            task_code_records = ()
+            task_code_status = (
+                "Complementary code evidence unavailable; "
+                "changed-path evidence retained."
+            )
     else:
         try:
             task_code_records = collect_code_evidence(

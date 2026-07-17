@@ -25,6 +25,7 @@ from agent_rails.context.change_evidence import (
     select_goal_tokens,
     write_change_evidence_bundle,
 )
+from agent_rails.evidence.code import CodeEvidenceError  # noqa: E402
 
 
 class ChangeEvidenceTest(unittest.TestCase):
@@ -151,6 +152,76 @@ class ChangeEvidenceTest(unittest.TestCase):
             self.assertIn("role=verification", rendered)
             self.assertIn("symbol=`SessionValidator`", rendered)
             self.assertNotIn("src/reporting.py", rendered)
+
+    def test_dirty_worktree_adds_untouched_code_and_test_complement(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-task-complement-") as temp_dir:
+            repo = self.make_repo(Path(temp_dir))
+            (repo / "src").mkdir()
+            (repo / "tests").mkdir()
+            (repo / "src/session_validator.py").write_text(
+                "class SessionValidator:\n    pass\n",
+                encoding="utf-8",
+            )
+            (repo / "src/session_store.py").write_text(
+                "class SessionValidatorStore:\n    pass\n",
+                encoding="utf-8",
+            )
+            (repo / "tests/test_session_validator.py").write_text(
+                "def test_session_validator() -> None:\n    assert True\n",
+                encoding="utf-8",
+            )
+            self.commit_all(repo, "base")
+            (repo / "src/session_validator.py").write_text(
+                "class SessionValidator:\n    changed = True\n",
+                encoding="utf-8",
+            )
+            (repo / "workspace_session.py").write_text(
+                "class WorkspaceSessionValidator:\n    pass\n",
+                encoding="utf-8",
+            )
+
+            request = self.request(repo, goal="session validator")
+            evidence = collect_change_evidence(request)
+            rendered = render_change_sections(evidence, request)
+
+            self.assertIn("src/session_validator.py", evidence.changed_paths)
+            self.assertIn("workspace_session.py", evidence.changed_paths)
+            self.assertEqual(
+                tuple(record.path for record in evidence.task_code_records),
+                (
+                    "src/session_store.py",
+                    "tests/test_session_validator.py",
+                ),
+            )
+            self.assertIn("changed = True", rendered)
+            self.assertIn("role=implementation", rendered)
+            self.assertIn("role=verification", rendered)
+            self.assertNotIn(
+                "workspace_session.py",
+                tuple(record.path for record in evidence.task_code_records),
+            )
+
+    def test_dirty_complement_failure_keeps_changed_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-task-complement-fail-") as temp_dir:
+            repo = self.make_repo(Path(temp_dir))
+            (repo / "session.py").write_text("base\n", encoding="utf-8")
+            self.commit_all(repo, "base")
+            (repo / "session.py").write_text("changed\n", encoding="utf-8")
+
+            with patch(
+                "agent_rails.context.change_evidence.collect_code_evidence",
+                side_effect=CodeEvidenceError("search failed"),
+            ):
+                evidence = collect_change_evidence(
+                    self.request(repo, goal="session validator")
+                )
+
+            self.assertEqual(evidence.changed_paths, ("session.py",))
+            self.assertEqual(evidence.task_code_records, ())
+            self.assertEqual(
+                evidence.task_code_status,
+                "Complementary code evidence unavailable; changed-path evidence retained.",
+            )
 
     def test_goal_tokens_keep_searchable_chinese_terms(self) -> None:
         tokens = select_goal_tokens("修复登录校验并减少无关代码", "fixture")

@@ -79,6 +79,7 @@ class CodeEvidenceRequest:
     query: str
     ignored_text: str = ""
     preferred_paths: Tuple[str, ...] = ()
+    excluded_paths: Tuple[str, ...] = ()
     limit: int = 4
 
 
@@ -142,8 +143,11 @@ def collect_code_evidence(
 
     content_paths = _content_paths(request, tokens)
     preferred = set(request.preferred_paths)
+    excluded = set(request.excluded_paths)
     ranked = []
     for path in _tracked_paths(request):
+        if path in excluded:
+            continue
         record = _score_path(path, tokens, path in content_paths, path in preferred)
         if record is not None:
             ranked.append(record)

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a review-stage Local Brain design covering optional off/shadow/assist modes, deterministic fallback, bounded fixed-snapshot reads, strict external Adapter JSON, Task/Repair Code Evidence decisions, Doctor integration, safety constraints, implementation slices, and deferred paired evaluation.
 - Bounded Code Evidence search at the I/O layer: tracked-path matches now stream as NUL-delimited records under byte and file-count caps, and the isolated Git process group stops as soon as enough candidates have been collected.
 - Kept changed-path evidence primary while adding a two-record untouched Code Evidence complement for dirty Task Packs, excluding frozen changed paths before implementation/test role pairing and degrading non-fatally when complement retrieval fails.
 - Deepened Code Evidence selection with implementation/verification/support roles and bounded role pairing, so small evidence sets preserve both a likely edit location and a related test location when available.

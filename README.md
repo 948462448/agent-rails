@@ -177,6 +177,7 @@ agent-rails update --tool opencode
 - [GitHub Release 分发设计](./docs/github-release-distribution.md)
 - [Token 预算与 OpenCode 请求钩子](./docs/token-budget-and-opencode-hook.zh-CN.md)
 - [Coding Agent 演进方向与 GitHub 调研](./docs/coding-agent-evolution.zh-CN.md)
+- [Local Brain 本地模型决策设计（评审稿）](./docs/local-brain-design.zh-CN.md)
 - [Agent Rails 评测策略](./docs/evaluation-strategy.zh-CN.md)
 - [TUI 黑盒 A/B 盲评手册](./docs/tui-ab-eval.zh-CN.md)
 - [Shell 到 Python 重构交接与开发台账](./docs/python-refactor-handoff.zh-CN.md)

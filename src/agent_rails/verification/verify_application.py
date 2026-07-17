@@ -19,6 +19,7 @@ from agent_rails.core.terminal import (
     terminal_literal as _terminal_literal,
     terminal_stream_text as _terminal_text,
 )
+from agent_rails.core.paths import AgentRailsPaths
 from agent_rails.git.scope import (
     GitScopeError,
     fingerprint_git_worktree,
@@ -39,6 +40,11 @@ from .check_application import (
     render_check_report,
 )
 from .plan import VerificationPlanError
+from .failure_protocol import (
+    clear_failure_history,
+    failure_history_path,
+    observe_failure,
+)
 from .repair_pack import RepairPackRequest, render_repair_pack
 from .publish_check import (
     PublishCheckCliOverrides,
@@ -205,6 +211,9 @@ def run_verify(
     execution_environment = dict(
         context.profile_environment or environment
     )
+    history_path = _failure_history_path(
+        kit_home, execution_environment, context
+    )
     events: list[VerifyEvent] = []
     out = _EventWriter(events, VerifyEventStream.STDOUT, stdout)
     err = _EventWriter(events, VerifyEventStream.STDERR, stderr)
@@ -253,6 +262,11 @@ def run_verify(
 
     if check_execution.exit_code != 0:
         if check_execution.failure is not None:
+            escalation = observe_failure(
+                history_path,
+                prepared.target_sha or "non-git",
+                check_execution.failure,
+            )
             out.write(
                 render_repair_pack(
                     RepairPackRequest(
@@ -260,6 +274,7 @@ def run_verify(
                         changed_paths=prepared.changed_paths,
                         project=prepared.project_root,
                         target_sha=prepared.target_sha or "",
+                        escalation=escalation,
                     )
                 )
             )
@@ -272,6 +287,9 @@ def run_verify(
             check_execution.exit_code,
             events,
         )
+
+    if not request.print_only:
+        clear_failure_history(history_path)
 
     publish_result: Optional[PublishCheckResult] = None
     if request.mode is VerifyMode.PUBLISH:
@@ -340,6 +358,22 @@ def run_verify(
         0,
         events,
     )
+
+
+def _failure_history_path(
+    kit_home: Path,
+    environment: Mapping[str, str],
+    context: TargetProjectContext,
+) -> Optional[Path]:
+    config_home = Path(
+        AgentRailsPaths.from_environment(kit_home, environment).config_home
+    )
+    if not config_home.is_absolute():
+        return None
+    try:
+        return failure_history_path(config_home, context.root)
+    except (OSError, UnicodeError, ValueError):
+        return None
 
 
 def _validate_request(request: VerifyRequest) -> None:

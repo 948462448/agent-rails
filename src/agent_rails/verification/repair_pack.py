@@ -7,24 +7,20 @@ from pathlib import Path
 import re
 from typing import Optional, Sequence, Tuple
 
-from agent_rails.core.terminal import terminal_literal, terminal_stream_text
+from agent_rails.core.terminal import terminal_literal
 from agent_rails.evidence.code import (
     CodeEvidenceError,
     CodeEvidenceRecord,
     CodeEvidenceRequest,
     collect_code_evidence,
 )
-from agent_rails.security.sensitive_output import (
-    SensitiveOutputError,
-    redact_sensitive_output,
+from agent_rails.verification.failure_protocol import (
+    FailureAction,
+    FailureEscalation,
+    prepare_failure_evidence,
 )
 
 
-_HIGH_VALUE = re.compile(
-    r"(assert(?:ion)?error|error|exception|fail(?:ed|ure)?|fatal|panic|"
-    r"syntaxerror|traceback)",
-    re.IGNORECASE,
-)
 _DEFAULT_MAX_CHARS = 4_000
 _MAX_LOCATIONS = 6
 _CODE_EVIDENCE_LIMIT = 4
@@ -50,20 +46,17 @@ class RepairPackRequest:
     max_chars: int = _DEFAULT_MAX_CHARS
     project: Optional[Path] = None
     target_sha: str = ""
+    escalation: Optional[FailureEscalation] = None
 
 
 def render_repair_pack(request: RepairPackRequest) -> str:
     """Turn one failed verification step into safe, focused terminal evidence."""
 
     failure = request.failure
-    stderr = _safe_output(failure.stderr)
-    stdout = _safe_output(failure.stdout)
-    lines, diagnostic_index = _diagnostic_lines(stderr, stdout)
-    excerpt = (
-        lines[max(0, diagnostic_index - 1) : diagnostic_index + 3]
-        if lines
-        else ["No diagnostic output captured."]
-    )
+    evidence = prepare_failure_evidence(failure)
+    stderr = evidence.stderr
+    stdout = evidence.stdout
+    excerpt = evidence.excerpt
     locations = _related_locations(
         (*stderr.splitlines(), *stdout.splitlines()), request.changed_paths
     )
@@ -100,6 +93,14 @@ def render_repair_pack(request: RepairPackRequest) -> str:
         ),
         "\nFirst diagnostic:\n",
     ]
+    if request.escalation is not None:
+        escalation = request.escalation
+        output[5:5] = [
+            f"- Failure fingerprint: {escalation.fingerprint[:12]}\n",
+            f"- Consecutive occurrences: {escalation.consecutive_count}\n",
+            "- Recurrence history: "
+            + ("recorded\n" if escalation.history_persisted else "unavailable\n"),
+        ]
     output.extend(f"  {terminal_literal(line)}\n" for line in excerpt)
     output.append("\nRelated project locations: ")
     if locations:
@@ -115,14 +116,7 @@ def render_repair_pack(request: RepairPackRequest) -> str:
             output.extend(_render_code_record(record) for record in code_records)
         else:
             output.append("\nRelated code evidence: no tracked match\n")
-    output.extend(
-        (
-            "\nNext action:\n",
-            "- Inspect the first diagnostic and confirmed locations, make the "
-            "smallest evidence-backed change, then rerun the exact failed "
-            "verification command shown above.\n",
-        )
-    )
+    output.extend(("\nNext action:\n", _next_action(request.escalation)))
     return _bounded("".join(output), request.max_chars)
 
 
@@ -134,24 +128,28 @@ def _render_code_record(record: CodeEvidenceRecord) -> str:
     )
 
 
-def _safe_output(text: str) -> str:
-    try:
-        return redact_sensitive_output(
-            terminal_stream_text(text), format_name="text"
+def _next_action(escalation: Optional[FailureEscalation]) -> str:
+    if escalation is not None and escalation.action is FailureAction.ESCALATE:
+        return (
+            "- The same failure reached the retry limit; stop blind retries. "
+            "Summarize proven facts and ruled-out causes, state the next "
+            "falsifiable hypothesis, and request user input only when required "
+            "authority or external facts are missing.\n"
         )
-    except (SensitiveOutputError, UnicodeError, OSError):
-        return "[repair evidence omitted: sensitive-output guard failed]\n"
-
-
-def _diagnostic_lines(stderr: str, stdout: str) -> tuple[list[str], int]:
-    lines = [line for line in stderr.splitlines() if line.strip()]
-    lines.extend(line for line in stdout.splitlines() if line.strip())
-    if not lines:
-        return [], 0
-    for index, line in enumerate(lines):
-        if _HIGH_VALUE.search(line):
-            return lines, index
-    return lines, len(lines) - 1
+    if (
+        escalation is not None
+        and escalation.action is FailureAction.CHANGE_STRATEGY
+    ):
+        return (
+            "- The same failure was observed twice; change strategy before "
+            "retrying. Recheck the current hypothesis, inspect a different "
+            "evidence source, and make only the next falsifiable change.\n"
+        )
+    return (
+        "- Inspect the first diagnostic and confirmed locations, make the "
+        "smallest evidence-backed change, then rerun the exact failed "
+        "verification command shown above.\n"
+    )
 
 
 def _related_locations(

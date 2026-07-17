@@ -455,6 +455,54 @@ class VerifyApplicationTest(unittest.TestCase):
         self.assertNotIn("Publish readiness", result.stdout)
         self.assertNotIn("verification complete", result.stdout)
 
+    def test_repeated_failures_escalate_and_success_clears_history(self) -> None:
+        context = self.context()
+        prepared = Mock(
+            name="prepared-check",
+            changed_paths=("runtime/module.py",),
+            project_root=self.project,
+            scope=None,
+            target_sha="target-a",
+        )
+        calls = 0
+
+        def execute(value, *, stdout, stderr):
+            nonlocal calls
+            calls += 1
+            if calls == 4:
+                return CheckExecutionResult(exit_code=0, completed_steps=1)
+            return CheckExecutionResult(
+                exit_code=19,
+                completed_steps=0,
+                failure=VerificationFailure(
+                    reason="runtime tests",
+                    exit_code=19,
+                    completed_steps=0,
+                    stdout="",
+                    stderr="runtime/module.py:12: AssertionError\n",
+                ),
+            )
+
+        with (
+            patch.object(verify_module, "resolve_target_project", return_value=context),
+            patch.object(verify_module, "prepare_check", return_value=prepared),
+            patch.object(verify_module, "render_check_report", return_value=""),
+            patch.object(verify_module, "execute_check", execute),
+        ):
+            first = run_verify(self.request())
+            second = run_verify(self.request())
+            third = run_verify(self.request())
+            success = run_verify(self.request())
+            after_success = run_verify(self.request())
+
+        self.assertIn("Consecutive occurrences: 1", first.stdout)
+        self.assertIn("Consecutive occurrences: 2", second.stdout)
+        self.assertIn("change strategy", second.stdout)
+        self.assertIn("Consecutive occurrences: 3", third.stdout)
+        self.assertIn("stop blind retries", third.stdout)
+        self.assertEqual(success.exit_code, 0)
+        self.assertIn("Consecutive occurrences: 1", after_success.stdout)
+
     def test_check_runtime_error_preserves_prior_output_exit_and_sanitizes(self) -> None:
         context = self.context()
         prepared = Mock(name="prepared-check")

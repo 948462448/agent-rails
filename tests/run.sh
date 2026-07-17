@@ -29,7 +29,7 @@ Usage: bash tests/run.sh [core|adapters|workflows|context ...]
        bash tests/run.sh --related [PATH ...]
        bash tests/run.sh --list-related [PATH ...]
 
-With no suite names, runs all 176 tests in their historical order.
+With no suite names, runs all 177 tests in their historical order.
 Related mode maps explicit paths, or current Git changes when no paths are
 given, to the smallest safe set of module suites.
 USAGE
@@ -114,7 +114,7 @@ select_related_path() {
     tests/test_context_assembler.py|tests/test_pack_*.py|tests/test_change_evidence.py|tests/test_memory_*.py|tests/test_project_docs.py|tests/test_contract_sections.py|tests/test_context_markdown.py|tests/test_private_text.py)
       related_context=1
       ;;
-    tests/test_check_application.py|tests/test_publish_check_application.py|tests/test_verify_application.py|tests/test_run_application.py|tests/test_verification_plan.py|tests/test_repair_pack.py|tests/test_git_scope.py|tests/test_sensitive_output.py|tests/test_estimate.py|tests/test_target_project.py|tests/test_profile_init.py|tests/test_ab_eval.py)
+    tests/test_check_application.py|tests/test_publish_check_application.py|tests/test_verify_application.py|tests/test_run_application.py|tests/test_verification_plan.py|tests/test_repair_pack.py|tests/test_failure_protocol.py|tests/test_git_scope.py|tests/test_sensitive_output.py|tests/test_estimate.py|tests/test_target_project.py|tests/test_profile_init.py|tests/test_ab_eval.py)
       related_workflows=1
       ;;
     tests/test_*.py)

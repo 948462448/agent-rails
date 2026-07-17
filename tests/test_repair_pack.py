@@ -19,6 +19,10 @@ from agent_rails.verification.repair_pack import (  # noqa: E402
     VerificationFailure,
     render_repair_pack,
 )
+from agent_rails.verification.failure_protocol import (  # noqa: E402
+    FailureAction,
+    FailureEscalation,
+)
 
 
 class RepairPackTest(unittest.TestCase):
@@ -193,6 +197,46 @@ class RepairPackTest(unittest.TestCase):
         )
 
         self.assertEqual(rendered, "")
+
+    def test_repeated_failure_changes_the_next_action(self) -> None:
+        failure = VerificationFailure(
+            reason="Python tests",
+            exit_code=1,
+            completed_steps=0,
+            stdout="",
+            stderr="tests/test_login.py:37: AssertionError\n",
+        )
+
+        changed = render_repair_pack(
+            RepairPackRequest(
+                failure=failure,
+                changed_paths=("tests/test_login.py",),
+                escalation=FailureEscalation(
+                    fingerprint="abc123def456",
+                    consecutive_count=2,
+                    action=FailureAction.CHANGE_STRATEGY,
+                    history_persisted=True,
+                ),
+            )
+        )
+        escalated = render_repair_pack(
+            RepairPackRequest(
+                failure=failure,
+                changed_paths=("tests/test_login.py",),
+                escalation=FailureEscalation(
+                    fingerprint="abc123def456",
+                    consecutive_count=3,
+                    action=FailureAction.ESCALATE,
+                    history_persisted=True,
+                ),
+            )
+        )
+
+        self.assertIn("Consecutive occurrences: 2", changed)
+        self.assertIn("change strategy", changed)
+        self.assertIn("Consecutive occurrences: 3", escalated)
+        self.assertIn("stop blind retries", escalated)
+        self.assertIn("next falsifiable hypothesis", escalated)
 
 
 if __name__ == "__main__":

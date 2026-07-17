@@ -101,7 +101,11 @@ agent-rails verify
 
 When a verification command fails, Verify preserves its exit status and live
 output, then appends a bounded, redacted Repair Pack focused on the first
-diagnostic and confirmed project locations.
+diagnostic and confirmed project locations. When the same failure repeats
+against one fixed target, the second occurrence requires a strategy change and
+the third stops blind retries in favor of proven facts and the next falsifiable
+hypothesis. A successful verification clears the private, fingerprint-only
+recurrence state.
 
 It selects and executes checks from the actual changes. Before a release or deployment, provide the source revision currently deployed when known:
 

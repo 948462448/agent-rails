@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a Verification Failure Protocol that keeps only a private redacted fingerprint and capped consecutive count, changes strategy on the second matching failure, escalates on the third, clears after successful verification, and never changes the original Check exit semantics when history is unavailable.
 - Added a review-stage Local Brain design covering a bounded Capability Catalog, recommend-only skill/tool decisions, optional off/shadow/assist modes, deterministic fallback, fixed-snapshot reads, strict external Adapter JSON, Task/Repair Code Evidence decisions, Doctor integration, safety constraints, implementation slices, deferred paired evaluation, and an offline SFT/DPO/GRPO learning roadmap with explicit MLX promotion gates.
 - Bounded Code Evidence search at the I/O layer: tracked-path matches now stream as NUL-delimited records under byte and file-count caps, and the isolated Git process group stops as soon as enough candidates have been collected.
 - Kept changed-path evidence primary while adding a two-record untouched Code Evidence complement for dirty Task Packs, excluding frozen changed paths before implementation/test role pairing and degrading non-fatally when complement retrieval fails.

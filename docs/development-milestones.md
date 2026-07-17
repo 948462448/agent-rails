@@ -99,6 +99,7 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 ## Near-Term Backlog
 
 - Continue the developer-first coding-agent roadmap recorded in [Coding Agent Evolution](./coding-agent-evolution.zh-CN.md): Task Code Evidence, Repair Pack, task decomposition, model-aware routing, and verified Memory Candidates.
+- After the Local Brain runtime and trace schema stabilize, build the offline [Local Brain Learning Loop](./local-brain-design.zh-CN.md): redacted traces first, then SFT/LoRA, DPO, and only later GRPO/RLVR, with quantized MLX models promoted through explicit offline, shadow, and assist gates.
 - Run one real OpenCode `off` versus `rails-lite` A/B fixture and record the non-sensitive summary.
 - Add a clearer repair command or doctor warning for stale adapter profile paths.
 - Extend the Sensitive Output Guard to encoded envelopes and carefully bounded high-entropy detection without increasing configuration false positives.

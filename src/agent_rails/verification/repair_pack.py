@@ -129,7 +129,9 @@ def render_repair_pack(request: RepairPackRequest) -> str:
 def _render_code_record(record: CodeEvidenceRecord) -> str:
     location = record.path if record.line <= 0 else f"{record.path}:{record.line}"
     symbol = f" symbol={terminal_literal(record.symbol)}" if record.symbol else ""
-    return f"- {terminal_literal(location)}{symbol}\n"
+    return (
+        f"- role={record.role.value} {terminal_literal(location)}{symbol}\n"
+    )
 
 
 def _safe_output(text: str) -> str:

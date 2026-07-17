@@ -344,6 +344,8 @@ PROFILE
   assert_contains "$output" "Exit code: 19"
   assert_contains "$output" "First diagnostic:"
   assert_contains "$output" "Related code evidence"
+  assert_contains "$output" "role=implementation"
+  assert_contains "$output" "role=verification"
   assert_contains "$output" "src/session_validator.py"
   assert_contains "$output" "tests/test_session_validator.py"
   assert_contains "$output" "Next action:"

@@ -147,6 +147,8 @@ class ChangeEvidenceTest(unittest.TestCase):
             )
             self.assertIn("## Task Code Evidence", rendered)
             self.assertIn("`src/session_validator.py:1`", rendered)
+            self.assertIn("role=implementation", rendered)
+            self.assertIn("role=verification", rendered)
             self.assertIn("symbol=`SessionValidator`", rendered)
             self.assertNotIn("src/reporting.py", rendered)
 

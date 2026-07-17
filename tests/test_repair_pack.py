@@ -133,6 +133,8 @@ class RepairPackTest(unittest.TestCase):
             self.assertIn("Related code evidence", rendered)
             self.assertIn("src/session_validator.py", rendered)
             self.assertIn("tests/test_session_validator.py", rendered)
+            self.assertIn("role=implementation", rendered)
+            self.assertIn("role=verification", rendered)
             self.assertIn("symbol=SessionValidator", rendered)
             self.assertNotIn("workspace_secret.py", rendered)
             self.assertNotIn("must-not-enter-repair-pack", rendered)

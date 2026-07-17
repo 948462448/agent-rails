@@ -602,6 +602,7 @@ def _render_task_code_record(record: TaskCodeRecord) -> str:
     )
     reasons = ", ".join(record.reasons)
     return (
-        f"- {markdown_code(location)} score={record.score}{symbol} "
+        f"- {markdown_code(location)} role={record.role.value} "
+        f"score={record.score}{symbol} "
         f"({valid_utf8(reasons)})\n"
     )

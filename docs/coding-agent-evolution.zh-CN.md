@@ -136,8 +136,12 @@ P0 约束：
 - 无 diff 时启用，有 changed paths 时继续以 changed evidence 为主；
 - 中文 Goal 保留可搜索的双字词，同时过滤常见动作词。
 
-后续可添加 tree-sitter 或 Language Server Adapter，但至少出现两个真实 Adapter 后
-再固定新的外部 Seam。
+在有界候选中，Code Evidence 优先保留一条 implementation 和一条 verification/test
+位置，再按相关分数填充剩余槽位。这样弱模型同时得到最小修改入口和验证入口，不因
+多个高分源码或测试占满候选而丢失闭环。
+
+后续可添加 tree-sitter 或 Language Server retrieval Implementation，但至少出现
+第二个真实检索 Implementation 后再固定 provider Seam。
 
 ### 2. Repair Pack
 

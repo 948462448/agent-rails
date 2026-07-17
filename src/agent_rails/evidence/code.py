@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 import re
 from typing import Optional, Tuple
@@ -65,6 +66,12 @@ class CodeEvidenceError(RuntimeError):
     pass
 
 
+class CodeEvidenceRole(Enum):
+    IMPLEMENTATION = "implementation"
+    VERIFICATION = "verification"
+    SUPPORT = "support"
+
+
 @dataclass(frozen=True)
 class CodeEvidenceRequest:
     project: Path
@@ -80,6 +87,7 @@ class CodeEvidenceRecord:
     path: str
     line: int
     symbol: str
+    role: CodeEvidenceRole
     score: int
     reasons: Tuple[str, ...]
 
@@ -87,6 +95,7 @@ class CodeEvidenceRecord:
 @dataclass(frozen=True)
 class _RankedCodePath:
     path: str
+    role: CodeEvidenceRole
     score: int
     reasons: Tuple[str, ...]
 
@@ -141,18 +150,39 @@ def collect_code_evidence(
     ranked.sort(key=lambda item: (item.score, item.path), reverse=True)
 
     records = []
-    for ranked_path in ranked[: request.limit]:
+    for ranked_path in _select_paths(ranked, request.limit):
         line, symbol = _location(request, ranked_path.path, tokens)
         records.append(
             CodeEvidenceRecord(
                 path=ranked_path.path,
                 line=line,
                 symbol=symbol,
+                role=ranked_path.role,
                 score=ranked_path.score,
                 reasons=ranked_path.reasons,
             )
         )
     return tuple(records)
+
+
+def _select_paths(
+    ranked: list[_RankedCodePath], limit: int
+) -> Tuple[_RankedCodePath, ...]:
+    selected = []
+    for role in (
+        CodeEvidenceRole.IMPLEMENTATION,
+        CodeEvidenceRole.VERIFICATION,
+    ):
+        match = next((item for item in ranked if item.role is role), None)
+        if match is not None and len(selected) < limit:
+            selected.append(match)
+    selected_paths = {item.path for item in selected}
+    selected.extend(
+        item
+        for item in ranked
+        if item.path not in selected_paths
+    )
+    return tuple(selected[:limit])
 
 
 def _tracked_paths(request: CodeEvidenceRequest) -> Tuple[str, ...]:
@@ -231,7 +261,15 @@ def _score_path(
     if BUILD_CONFIG.search(lowered):
         score += 15
         reasons.append("build-config")
-    return _RankedCodePath(path, score, tuple(reasons))
+    return _RankedCodePath(path, _path_role(lowered), score, tuple(reasons))
+
+
+def _path_role(lowered_path: str) -> CodeEvidenceRole:
+    if TEST_PATH.search(lowered_path) or TEST_FILE.search(lowered_path):
+        return CodeEvidenceRole.VERIFICATION
+    if CODE_SUFFIX.search(lowered_path):
+        return CodeEvidenceRole.IMPLEMENTATION
+    return CodeEvidenceRole.SUPPORT
 
 
 def _location(

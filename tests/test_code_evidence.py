@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from agent_rails.evidence.code import (  # noqa: E402
     CodeEvidenceError,
     CodeEvidenceRequest,
+    CodeEvidenceRole,
     collect_code_evidence,
     select_code_tokens,
 )
@@ -82,12 +83,50 @@ class CodeEvidenceTest(unittest.TestCase):
             self.assertIn("src/session_validator.py", paths)
             self.assertIn("tests/test_session_validator.py", paths)
             self.assertNotIn("untracked_session_validator.py", paths)
-            self.assertEqual(records[0].path, "tests/test_session_validator.py")
+            self.assertEqual(records[0].role, CodeEvidenceRole.IMPLEMENTATION)
+            self.assertEqual(records[1].role, CodeEvidenceRole.VERIFICATION)
             source = next(
                 record for record in records if record.path == "src/session_validator.py"
             )
             self.assertEqual(source.symbol, "SessionValidator")
             self.assertEqual(source.line, 1)
+
+    def test_small_limit_preserves_implementation_and_verification_pair(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-code-pair-") as temp_dir:
+            repo = Path(temp_dir)
+            self.git(repo, "init", "-q")
+            self.git(repo, "config", "user.name", "Agent Rails Test")
+            self.git(repo, "config", "user.email", "agent-rails@example.invalid")
+            (repo / "src").mkdir()
+            (repo / "tests").mkdir()
+            for name in ("session_validator.py", "session_validator_helper.py"):
+                (repo / "src" / name).write_text(
+                    "class SessionValidator:\n    pass\n",
+                    encoding="utf-8",
+                )
+            (repo / "tests/test_session_validator.py").write_text(
+                "def test_session_validator() -> None:\n    assert True\n",
+                encoding="utf-8",
+            )
+            self.git(repo, "add", "src", "tests")
+            self.git(repo, "commit", "-qm", "base")
+
+            records = collect_code_evidence(
+                CodeEvidenceRequest(
+                    project=repo,
+                    target_sha=self.git(repo, "rev-parse", "HEAD"),
+                    query="session validator",
+                    limit=2,
+                )
+            )
+
+            self.assertEqual(
+                tuple(record.role for record in records),
+                (
+                    CodeEvidenceRole.IMPLEMENTATION,
+                    CodeEvidenceRole.VERIFICATION,
+                ),
+            )
 
     def test_token_selection_supports_cjk_and_ignored_project_name(self) -> None:
         tokens = select_code_tokens(

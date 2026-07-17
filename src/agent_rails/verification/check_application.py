@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import deque
 from enum import Enum
 import os
 from pathlib import Path
@@ -38,6 +39,7 @@ from .plan import (
     build_verification_plan,
     render_suggestions,
 )
+from .repair_pack import VerificationFailure
 
 
 CHECK_PROFILE_VARIABLES = (
@@ -58,6 +60,8 @@ CHECK_PROFILE_VARIABLES = (
 )
 
 _CHILD_READ_BYTES = 65_536
+_FAILURE_CAPTURE_CHARS = 20_000
+_FAILURE_CAPTURE_LINE_CHARS = 4_000
 
 
 class CheckApplicationError(RuntimeError):
@@ -117,6 +121,55 @@ class PreparedCheck:
 class CheckExecutionResult:
     exit_code: int
     completed_steps: int
+    failure: Optional[VerificationFailure] = None
+
+
+@dataclass(frozen=True)
+class _ChildExecution:
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+    output_truncated: bool = False
+
+
+class _CompleteLineCapture:
+    """Keep only bounded complete logical lines from one child stream."""
+
+    def __init__(self) -> None:
+        self._lines: deque[str] = deque()
+        self._chars = 0
+        self._pending = ""
+        self._dropping_line = False
+        self.truncated = False
+
+    def feed(self, text: str) -> None:
+        for part in text.splitlines(keepends=True):
+            complete = part.endswith("\n")
+            value = part[:-1] if complete else part
+            if not self._dropping_line:
+                self._pending += value
+                if len(self._pending) > _FAILURE_CAPTURE_LINE_CHARS:
+                    self._pending = ""
+                    self._dropping_line = True
+                    self.truncated = True
+            if complete:
+                if not self._dropping_line:
+                    self._append(self._pending)
+                self._pending = ""
+                self._dropping_line = False
+
+    def finish(self) -> str:
+        if self._pending and not self._dropping_line:
+            self._append(self._pending)
+        self._pending = ""
+        return "\n".join(self._lines)
+
+    def _append(self, line: str) -> None:
+        self._lines.append(line)
+        self._chars += len(line) + 1
+        while self._chars > _FAILURE_CAPTURE_CHARS and self._lines:
+            self._chars -= len(self._lines.popleft()) + 1
+            self.truncated = True
 
 
 def prepare_check(
@@ -363,7 +416,7 @@ def execute_check(
             flush=True,
         )
         try:
-            exit_code = _run_check_child(
+            child = _run_check_child(
                 prepared,
                 step.command,
                 child_environment,
@@ -387,11 +440,21 @@ def execute_check(
                 flush=True,
             )
             return CheckExecutionResult(exit_code=126, completed_steps=completed_steps)
+        exit_code = child.exit_code
         if exit_code < 0:
             exit_code = 128 - exit_code
         if exit_code != 0:
             return CheckExecutionResult(
-                exit_code=exit_code, completed_steps=completed_steps
+                exit_code=exit_code,
+                completed_steps=completed_steps,
+                failure=VerificationFailure(
+                    reason=step.reason,
+                    exit_code=exit_code,
+                    completed_steps=completed_steps,
+                    stdout=child.stdout,
+                    stderr=child.stderr,
+                    output_truncated=child.output_truncated,
+                ),
             )
         _validate_execution_snapshot(prepared)
         completed_steps += 1
@@ -405,17 +468,19 @@ def _run_check_child(
     *,
     stdout: Optional[TextIO],
     stderr: Optional[TextIO],
-) -> int:
+) -> _ChildExecution:
     """Run one command, streaming only the explicitly requested child pipes."""
 
     arguments = [prepared.runner_shell, "-lc", command]
     if stdout is None and stderr is None:
-        return subprocess.run(
-            arguments,
-            cwd=prepared.project_root,
-            env=environment,
-            check=False,
-        ).returncode
+        return _ChildExecution(
+            subprocess.run(
+                arguments,
+                cwd=prepared.project_root,
+                env=environment,
+                check=False,
+            ).returncode
+        )
 
     process = subprocess.Popen(
         arguments,
@@ -447,31 +512,37 @@ def _stream_child_output(
     *,
     stdout: Optional[TextIO],
     stderr: Optional[TextIO],
-) -> int:
-    """Drain stdout and stderr concurrently without retaining child output."""
+) -> _ChildExecution:
+    """Drain both streams while retaining only bounded complete lines."""
+
+    stdout_capture = _CompleteLineCapture()
+    stderr_capture = _CompleteLineCapture()
+
+    def sink(writer: TextIO, capture: _CompleteLineCapture, text: str) -> None:
+        safe = _terminal_stream_text(text)
+        capture.feed(safe)
+        _write_output(writer, safe, flush=True)
 
     try:
-        return stream_process_output(
+        exit_code = stream_process_output(
             process,
             stdout_sink=(
                 None
                 if stdout is None
-                else lambda text: _write_output(
-                    stdout,
-                    _terminal_stream_text(text),
-                    flush=True,
-                )
+                else lambda text: sink(stdout, stdout_capture, text)
             ),
             stderr_sink=(
                 None
                 if stderr is None
-                else lambda text: _write_output(
-                    stderr,
-                    _terminal_stream_text(text),
-                    flush=True,
-                )
+                else lambda text: sink(stderr, stderr_capture, text)
             ),
             chunk_bytes=_CHILD_READ_BYTES,
+        )
+        return _ChildExecution(
+            exit_code=exit_code,
+            stdout=stdout_capture.finish(),
+            stderr=stderr_capture.finish(),
+            output_truncated=(stdout_capture.truncated or stderr_capture.truncated),
         )
     except ChildProcessStreamError as exc:
         raise CheckApplicationError(

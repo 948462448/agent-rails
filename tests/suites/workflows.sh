@@ -336,6 +336,10 @@ PROFILE
 
   [[ "$status" -eq 19 ]]
   assert_contains "$output" "partial-verification-output"
+  assert_contains "$output" "Repair Pack"
+  assert_contains "$output" "Exit code: 19"
+  assert_contains "$output" "First diagnostic:"
+  assert_contains "$output" "Next action:"
   assert_not_contains "$output" "Publish readiness"
   assert_not_contains "$output" "verification complete"
 }
@@ -748,6 +752,12 @@ test_python_verification_plan_module() {
     python3 "$ROOT_DIR/tests/test_verification_plan.py"
 }
 
+test_python_repair_pack_module() {
+  PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/src" \
+    python3 "$ROOT_DIR/tests/test_repair_pack.py"
+}
+
 test_python_check_application_module() {
   PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH="$ROOT_DIR/src" \
@@ -1097,6 +1107,7 @@ run_workflow_tests() {
   run_test test_python_git_scope_modules "Python Git Scope module"
   run_test test_python_sensitive_output_modules "Python Sensitive Output Guard"
   run_test test_python_verification_plan_module "Python Verification Plan module"
+  run_test test_python_repair_pack_module "Python Repair Pack module"
   run_test test_python_check_application_module "Python Agent Check Application Service"
   run_test test_python_publish_check_application_module "Python Publish Check Application Service"
   run_test test_python_verify_application_module "Python Verify Application Service"

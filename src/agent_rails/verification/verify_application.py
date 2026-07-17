@@ -39,6 +39,7 @@ from .check_application import (
     render_check_report,
 )
 from .plan import VerificationPlanError
+from .repair_pack import RepairPackRequest, render_repair_pack
 from .publish_check import (
     PublishCheckCliOverrides,
     PublishCheckError,
@@ -251,6 +252,16 @@ def run_verify(
         raise VerifyApplicationError(str(exc), events=tuple(events)) from exc
 
     if check_execution.exit_code != 0:
+        if check_execution.failure is not None:
+            out.write(
+                render_repair_pack(
+                    RepairPackRequest(
+                        failure=check_execution.failure,
+                        changed_paths=prepared.changed_paths,
+                    )
+                )
+            )
+            out.flush()
         return _result(
             request,
             context,

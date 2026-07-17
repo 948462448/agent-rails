@@ -536,6 +536,47 @@ VERIFY_PYTHON='printf "python-ok\\n"'
             self.assertEqual(result.completed_steps, 0)
             self.assertTrue(stdout.getvalue().endswith("partial-output"))
             self.assertEqual(stderr.getvalue(), "partial-error")
+            self.assertIsNotNone(result.failure)
+            assert result.failure is not None
+            self.assertEqual(result.failure.reason, "partial")
+            self.assertEqual(result.failure.exit_code, 9)
+            self.assertEqual(result.failure.stdout, "partial-output")
+            self.assertEqual(result.failure.stderr, "partial-error")
+
+    def test_failed_child_capture_is_bounded_while_stream_output_is_complete(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-check-bounded-") as temp_dir:
+            root = Path(temp_dir)
+            payload_size = 200_000
+            source = (
+                "import os; "
+                f"os.write(2, b'N' * {payload_size}); "
+                "os.write(2, b'\\ntests/test_app.py:8: AssertionError\\n'); "
+                "raise SystemExit(5)"
+            )
+            command = f"{shlex.quote(sys.executable)} -c {shlex.quote(source)}"
+            prepared = replace(
+                self._prepared(root),
+                plan=VerificationPlan(
+                    steps=(VerificationStep("bounded", command),)
+                ),
+            )
+            stderr = io.StringIO()
+
+            result = execute_check(
+                prepared, stdout=io.StringIO(), stderr=stderr
+            )
+
+            self.assertEqual(result.exit_code, 5)
+            self.assertEqual(stderr.getvalue().count("N"), payload_size)
+            self.assertTrue(
+                stderr.getvalue().endswith(
+                    "\ntests/test_app.py:8: AssertionError\n"
+                )
+            )
+            self.assertIsNotNone(result.failure)
+            assert result.failure is not None
+            self.assertLessEqual(len(result.failure.stderr), 20_000)
+            self.assertIn("tests/test_app.py:8", result.failure.stderr)
 
     def test_custom_writer_preserves_real_child_signal_exit_semantics(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-check-signal-") as temp_dir:

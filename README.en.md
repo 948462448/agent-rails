@@ -99,6 +99,10 @@ You can ask the agent for a pre-commit check, or run:
 agent-rails verify
 ```
 
+When a verification command fails, Verify preserves its exit status and live
+output, then appends a bounded, redacted Repair Pack focused on the first
+diagnostic and confirmed project locations.
+
 It selects and executes checks from the actual changes. Before a release or deployment, provide the source revision currently deployed when known:
 
 ```bash

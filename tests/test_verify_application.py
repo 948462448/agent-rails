@@ -25,6 +25,7 @@ from agent_rails.verification.check_application import (  # noqa: E402
     CheckExecutionResult,
     CheckMode,
 )
+from agent_rails.verification.repair_pack import VerificationFailure  # noqa: E402
 from agent_rails.verification.publish_check import (  # noqa: E402
     PublishCheckCliOverrides,
     PublishCheckError,
@@ -407,12 +408,25 @@ class VerifyApplicationTest(unittest.TestCase):
 
     def test_nonzero_check_short_circuits_publish_and_completion(self) -> None:
         context = self.context()
-        prepared = Mock(name="prepared-check")
+        prepared = Mock(
+            name="prepared-check",
+            changed_paths=("runtime/module.py",),
+        )
         publish = Mock(side_effect=AssertionError("failed Check invoked Publish"))
 
         def execute(value, *, stdout, stderr):
             stdout.write("check-failed-after-output\n")
-            return CheckExecutionResult(exit_code=19, completed_steps=1)
+            return CheckExecutionResult(
+                exit_code=19,
+                completed_steps=1,
+                failure=VerificationFailure(
+                    reason="runtime tests",
+                    exit_code=19,
+                    completed_steps=1,
+                    stdout="",
+                    stderr="runtime/module.py:12: AssertionError\n",
+                ),
+            )
 
         with (
             patch.object(verify_module, "resolve_target_project", return_value=context),
@@ -432,6 +446,9 @@ class VerifyApplicationTest(unittest.TestCase):
         self.assertEqual(result.check_execution.exit_code, 19)
         self.assertIsNone(result.publish_result)
         self.assertIn("check-failed-after-output", result.stdout)
+        self.assertIn("Repair Pack", result.stdout)
+        self.assertIn("runtime/module.py:12", result.stdout)
+        self.assertNotIn("python3 tests/runtime.py", result.stdout)
         self.assertNotIn("Publish readiness", result.stdout)
         self.assertNotIn("verification complete", result.stdout)
 

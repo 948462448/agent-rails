@@ -45,6 +45,22 @@ agent-rails run \
 
 指定 `--token-budget` 后，`pack` 会按栏目权重组装并硬限制最终 token 数；空闲类别的额度会回流。`huggingface` 从 `--tokenizer-path` 加载本地 tokenizer，`command` 从 `AGENT_RAILS_TOKENIZER_INPUT` 读取输入文件。OpenCode 的逐请求预算与 Profile 参数见 [Token 预算与 OpenCode 请求钩子](./token-budget-and-opencode-hook.zh-CN.md)。
 
+### `pack`
+
+```bash
+agent-rails pack \
+  [--project PATH] \
+  [--profile PATH] \
+  [--task-file PATH] \
+  [--rubric-file PATH] \
+  [--pack-mode lite|normal|deep|audit] \
+  "目标"
+```
+
+复杂开发或评测任务应显式传入冻结的任务和评分文件。相对路径按目标项目解析，绝对路径可用于个人评测目录；文件必须是普通、非符号链接的严格 UTF-8 文本，进入 Task Pack 前会经过敏感输出脱敏。
+
+显式文件会完整进入受保护的 Product Contract，并生成稳定的 `AC-*` / `RUB-*` 编号和 Acceptance Evidence Matrix。硬 token 预算不足以容纳完整合同时，`pack` 会失败，不会静默截断合同。如果目标声称存在“附件”或“冻结合同”却没有传入文件，`pack` 同样拒绝生成，避免 agent 在缺失需求时猜测。Profile 中配置的验证命令优先；未配置时，`pack` 会从项目结构探测建议命令，并在干净工作树中使用任务相关代码证据确定验证范围。
+
 ### `verify`
 
 ```bash

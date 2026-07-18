@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from agent_rails.context.markdown import display_text, markdown_code
+from agent_rails.context.task_contract import ContractCriterion
 from agent_rails.evidence.code import CodeEvidenceRecord, CodeEvidenceRole
 from agent_rails.verification.plan import VerificationPlan
 
@@ -20,6 +21,7 @@ class TaskModelRequest:
     changed_paths: Tuple[str, ...]
     code_evidence: Tuple[CodeEvidenceRecord, ...]
     verification: VerificationPlan
+    contract_criteria: Tuple[ContractCriterion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,7 @@ class TaskModel:
     behavior_invariants: Tuple[str, ...]
     change_plan: Tuple[str, ...]
     acceptance_criteria: Tuple[str, ...]
+    evidence_matrix: Tuple[str, ...]
     do_not_change: Tuple[str, ...]
     open_assumptions: Tuple[str, ...]
 
@@ -80,12 +83,27 @@ def build_task_model(request: TaskModelRequest) -> TaskModel:
     if request.verification.steps:
         change_plan.append("Run the selected Verification Plan after the focused change.")
 
-    acceptance = [
-        "Demonstrate the requested outcome with a focused fixture or targeted test: "
-        + markdown_code(_single_line(request.goal))
-        + ".",
-        "Explain any changed path outside this task model before treating the result as complete.",
-    ]
+    if request.contract_criteria:
+        acceptance = [
+            f"{criterion.identifier} [{criterion.source}] {criterion.text}"
+            for criterion in request.contract_criteria
+        ]
+        evidence_matrix = [
+            f"{criterion.identifier}: implementation path + focused acceptance evidence + verification result."
+            for criterion in request.contract_criteria
+        ]
+    else:
+        acceptance = [
+            "AC-001 [goal] Demonstrate the requested outcome with a focused fixture or targeted test: "
+            + markdown_code(_single_line(request.goal))
+            + "."
+        ]
+        evidence_matrix = [
+            "AC-001: implementation path + focused acceptance evidence + verification result."
+        ]
+    acceptance.append(
+        "SYS-001 Explain any changed path outside this task model before treating the result as complete."
+    )
     if request.verification.steps:
         acceptance.extend(
             "Verification category passes: " + markdown_code(step.reason) + "."
@@ -115,6 +133,7 @@ def build_task_model(request: TaskModelRequest) -> TaskModel:
         behavior_invariants=tuple(behavior_invariants),
         change_plan=tuple(change_plan),
         acceptance_criteria=tuple(acceptance),
+        evidence_matrix=tuple(evidence_matrix),
         do_not_change=tuple(do_not_change),
         open_assumptions=tuple(assumptions),
     )
@@ -127,6 +146,7 @@ def render_task_model(model: TaskModel) -> str:
             _render_group("Behavior Invariants", model.behavior_invariants),
             _render_group("Change Plan", model.change_plan),
             _render_group("Acceptance Criteria", model.acceptance_criteria),
+            _render_group("Acceptance Evidence Matrix", model.evidence_matrix),
             _render_group("Do Not Change", model.do_not_change),
             _render_group("Open Assumptions", model.open_assumptions),
         )
@@ -150,4 +170,4 @@ def _render_group(title: str, values: Tuple[str, ...]) -> str:
 
 
 def _single_line(value: str) -> str:
-    return " ".join(display_text(value).split())[:240] or "Unspecified goal"
+    return " ".join(display_text(value).split()) or "Unspecified goal"

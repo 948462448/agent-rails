@@ -64,6 +64,15 @@ class ProfileInitPlanTest(unittest.TestCase):
             self.assertEqual(commands.node, "npm test")
             self.assertEqual(commands.python, "")
 
+    def test_verification_detection_recognizes_gradle_kotlin_dsl(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-profile-gradle-") as temp_dir:
+            project = Path(temp_dir)
+            (project / "settings.gradle.kts").write_text("", encoding="utf-8")
+
+            commands = detect_verification_commands(project)
+
+            self.assertEqual(commands.java, "gradle test")
+
 
 class ProfileRenderTest(unittest.TestCase):
     def test_generated_shell_treats_explicit_name_as_literal_data(self) -> None:

@@ -16,7 +16,8 @@ from agent_rails.git._runner import isolated_git_environment, run_git
 STOP_WORDS = frozenset(
     "agent agents rails task pack project repo code change changes work continue "
     "continuing optimize optimization reduce reducing keep keeping with without "
-    "from into this that".split()
+    "from into this that the and for all any use used using support supports "
+    "file files explicit attached frozen update updating updated".split()
 )
 BINARY_SUFFIXES = (
     ".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".pdf", ".png", ".webp",
@@ -25,18 +26,19 @@ BINARY_SUFFIXES = (
     ".class", ".pyc",
 )
 CODE_SUFFIX = re.compile(
-    r"\.(sh|py|js|jsx|ts|tsx|java|kt|go|rs|mjs|cjs|rb|php|swift)$"
+    r"\.(sh|py|js|jsx|ts|tsx|java|kt|kts|go|rs|mjs|cjs|rb|php|swift)$"
 )
 TEST_PATH = re.compile(r"(^|/)(test|tests|spec|specs)/")
 TEST_FILE = re.compile(r"(test|spec)\.(sh|py|js|ts|tsx|jsx)$")
 ENTRY_DOC = re.compile(r"(^|/)(agents|claude|readme|context)([-_.a-z0-9]*)?\.md$")
 BUILD_CONFIG = re.compile(
     r"(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|pom\.xml|"
-    r"build\.gradle|pyproject\.toml|requirements.*\.txt|go\.mod|cargo\.toml)$"
+    r"build\.gradle(?:\.kts)?|settings\.gradle(?:\.kts)?|pyproject\.toml|"
+    r"requirements.*\.txt|go\.mod|cargo\.toml)$"
 )
 _SEARCH_SUFFIXES = (
     ".sh", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt",
-    ".go", ".rs", ".mjs", ".cjs", ".rb", ".php", ".swift", ".md",
+    ".go", ".rs", ".mjs", ".cjs", ".rb", ".php", ".swift", ".kts", ".md",
     ".txt", ".toml", ".yaml", ".yml", ".json", ".xml", ".properties",
     ".gradle", ".cfg", ".ini",
 )
@@ -121,6 +123,9 @@ def select_code_tokens(query: str, ignored_text: str = "") -> Tuple[str, ...]:
         seen.add(token)
         if len(selected) == 6:
             break
+
+    if len(selected) >= 6:
+        return tuple(selected)
 
     cjk_query = query
     for phrase in _CJK_STOP_PHRASES:
@@ -289,9 +294,9 @@ def _score_path(
     lowered = path.casefold()
     score = 0
     reasons = []
-    for token in tokens:
+    for index, token in enumerate(tokens):
         if token in lowered:
-            score += 80
+            score += max(50, 80 - index * 6)
             reasons.append(f"path:{token}")
     if content_match:
         score += 45

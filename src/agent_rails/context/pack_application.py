@@ -8,6 +8,7 @@ import re
 from typing import Mapping, Optional, Tuple
 
 from agent_rails.config.profile import ProfileLoadError
+from agent_rails.config.profile_init import detect_verification_commands
 from agent_rails.config.target_project import (
     TargetProjectContext,
     TargetProjectError,
@@ -30,6 +31,12 @@ from agent_rails.context.task_model import (
     TaskModelRequest,
     build_task_model,
     render_task_model,
+)
+from agent_rails.context.task_contract import (
+    TaskContractError,
+    TaskContractRequest,
+    load_task_contract,
+    render_task_contract,
 )
 from agent_rails.context.pack_renderer import (
     PackRendererError,
@@ -141,6 +148,8 @@ class PackCliOverrides:
     tokenizer: Optional[str] = None
     tokenizer_command: Optional[str] = None
     tokenizer_path: Optional[str] = None
+    task_file: Optional[str] = None
+    rubric_file: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -267,6 +276,7 @@ def generate_task_pack(request: PackApplicationRequest) -> PackApplicationResult
         ProfileLoadError,
         PackApplicationError,
         PackRendererError,
+        TaskContractError,
     ):
         raise
     except Exception as exc:
@@ -354,6 +364,14 @@ def _generate_task_pack(request: PackApplicationRequest) -> PackApplicationResul
             ),
         )
     )
+    task_contract = load_task_contract(
+        TaskContractRequest(
+            project=context.root,
+            goal=request.goal,
+            task_file=overrides.task_file,
+            rubric_file=overrides.rubric_file,
+        )
+    )
 
     memory_local_dir = _value(
         values,
@@ -382,13 +400,19 @@ def _generate_task_pack(request: PackApplicationRequest) -> PackApplicationResul
     verification_fallback_used = False
     verification = VerificationPlan(steps=())
     try:
+        verification_paths = change_evidence.changed_paths or tuple(
+            record.path for record in change_evidence.task_code_records
+        )
         verification = build_verification_plan(
             VerificationPlanRequest(
                 project=context.root,
-                changed_paths=change_evidence.changed_paths,
+                changed_paths=verification_paths,
                 target_ref=downstream_target,
                 target_ref_explicit=overrides.target_ref_explicit,
-                commands=_verification_commands(values),
+                commands=_verification_commands(values, context.root),
+                path_label=(
+                    "changed" if change_evidence.changed_paths else "task scope"
+                ),
             )
         )
         verification_suggestions = render_suggestions(verification)
@@ -405,6 +429,7 @@ def _generate_task_pack(request: PackApplicationRequest) -> PackApplicationResul
                 changed_paths=change_evidence.changed_paths,
                 code_evidence=change_evidence.task_code_records,
                 verification=verification,
+                contract_criteria=task_contract.criteria,
             )
         )
     )
@@ -414,6 +439,7 @@ def _generate_task_pack(request: PackApplicationRequest) -> PackApplicationResul
         display_path=output.display_path,
         policy=policy,
         sections=RenderedPackSections(
+            product_contract=render_task_contract(task_contract),
             git_evidence=render_change_sections(change_evidence, change_request),
             project_docs_entry=render_entry_sections(project_docs),
             task_model=task_model,
@@ -481,21 +507,26 @@ def _resolve_policy(values: Mapping[str, str], overrides: PackCliOverrides) -> P
     )
 
 
-def _verification_commands(values: Mapping[str, str]) -> VerificationCommands:
+def _verification_commands(
+    values: Mapping[str, str], project: Path
+) -> VerificationCommands:
+    detected = detect_verification_commands(project)
+    configured_project = values.get("VERIFY_PROJECT", "")
+    language_fallback = VerificationCommands() if configured_project else detected
     return VerificationCommands(
         contracts=_value(values, "VERIFY_CONTRACTS", ""),
         backend=_value(values, "VERIFY_BACKEND", ""),
         runtime=_value(values, "VERIFY_RUNTIME", ""),
         frontend=_value(values, "VERIFY_FRONTEND", ""),
-        node=_value(values, "VERIFY_NODE", ""),
-        python=_value(values, "VERIFY_PYTHON", ""),
-        java=_value(values, "VERIFY_JAVA", ""),
-        go=_value(values, "VERIFY_GO", ""),
-        rust=_value(values, "VERIFY_RUST", ""),
+        node=_value(values, "VERIFY_NODE", language_fallback.node),
+        python=_value(values, "VERIFY_PYTHON", language_fallback.python),
+        java=_value(values, "VERIFY_JAVA", language_fallback.java),
+        go=_value(values, "VERIFY_GO", language_fallback.go),
+        rust=_value(values, "VERIFY_RUST", language_fallback.rust),
         dolphin=_value(values, "VERIFY_DOLPHIN", ""),
         shell=_value(values, "VERIFY_SHELL", ""),
         tests=_value(values, "VERIFY_TESTS", ""),
-        project=_value(values, "VERIFY_PROJECT", ""),
+        project=configured_project or detected.project,
     )
 
 

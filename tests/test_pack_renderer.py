@@ -272,7 +272,7 @@ class PackRendererTest(unittest.TestCase):
                 for section in split_sections(content)
                 if section.name != "__preamble__"
             ],
-            list(SECTION_RULES),
+            [name for name in SECTION_RULES if name != "Product Contract"],
         )
 
     def test_display_path_is_a_collision_free_code_span(self) -> None:
@@ -363,6 +363,30 @@ class PackRendererTest(unittest.TestCase):
             )
             self.assertEqual(
                 list(output.parent.glob(".agent-rails-task-pack.*")), []
+            )
+
+    def test_hard_cap_never_truncates_explicit_product_contract(self) -> None:
+        sections = replace(
+            self.sections(),
+            product_contract=(
+                "## Product Contract\n\n"
+                + "".join(f"- AC-{index:03d} complete criterion\n" for index in range(80))
+                + "\n"
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            PackRendererError,
+            "below required section structure minimum",
+        ):
+            build_task_pack(
+                self.request(
+                    sections=sections,
+                    policy_input=PackPolicyInput(
+                        context_budget_tokens="500",
+                        chars_per_token="1",
+                    ),
+                )
             )
 
     def test_existing_non_regular_output_is_rejected(self) -> None:

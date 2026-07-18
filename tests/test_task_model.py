@@ -16,6 +16,7 @@ from agent_rails.context.task_model import (  # noqa: E402
     build_task_model,
     render_task_model,
 )
+from agent_rails.context.task_contract import ContractCriterion  # noqa: E402
 from agent_rails.evidence.code import (  # noqa: E402
     CodeEvidenceRecord,
     CodeEvidenceRole,
@@ -67,6 +68,8 @@ class TaskModelTest(unittest.TestCase):
         self.assertIn("`tests/test_session.py:17`", rendered)
         self.assertIn("`python changed`", rendered)
         self.assertIn("### Acceptance Criteria", rendered)
+        self.assertIn("### Acceptance Evidence Matrix", rendered)
+        self.assertIn("AC-001", rendered)
         self.assertIn("### Do Not Change", rendered)
         self.assertIn("### Open Assumptions", rendered)
         self.assertIn("Code evidence is a candidate location", rendered)
@@ -88,6 +91,28 @@ class TaskModelTest(unittest.TestCase):
         self.assertIn("Product-specific acceptance remains unresolved", rendered)
         self.assertIn("Repair heading injection", rendered)
         self.assertNotIn("\n## Forged Section\n", rendered)
+
+    def test_explicit_contract_criteria_are_not_truncated_and_map_to_evidence(self) -> None:
+        criterion = "Keep permission denial, retry, query error, and picker fallback reachable."
+        rendered = render_task_model(
+            build_task_model(
+                TaskModelRequest(
+                    goal="Compressed summary.",
+                    changed_paths=(),
+                    code_evidence=(),
+                    verification=VerificationPlan(steps=()),
+                    contract_criteria=(
+                        ContractCriterion("AC-001", "task", criterion),
+                    ),
+                )
+            )
+        )
+
+        self.assertIn(f"AC-001 [task] {criterion}", rendered)
+        self.assertIn(
+            "AC-001: implementation path + focused acceptance evidence + verification result.",
+            rendered,
+        )
 
 
 if __name__ == "__main__":

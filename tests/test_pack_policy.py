@@ -117,6 +117,17 @@ class PackPolicyTest(unittest.TestCase):
         self.assertEqual(values["AGENT_RAILS_CHANGED_FILE_EXCERPT_CHARS"], "900")
         self.assertEqual(values["git_budget_chars"], "0")
 
+    def test_deepseek_flash_keeps_its_name_and_uses_pro_limits(self) -> None:
+        policy = resolve_pack_policy(
+            PackPolicyInput(model="deepseekv4flash", pack_mode="deep")
+        )
+
+        self.assertEqual(policy.model.canonical, "deepseek-v4-flash")
+        self.assertEqual(policy.model.preset.context_tokens, 1_000_000)
+        self.assertEqual(policy.model.preset.max_output_tokens, 384_000)
+        self.assertEqual(policy.budget.effective_tokens, 160_000)
+        self.assertEqual(policy.budget.source, "model preset")
+
     def test_cli_shell_output_quotes_untrusted_model_names(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-pack-policy-") as temp_dir:
             marker = Path(temp_dir) / "must-not-exist"

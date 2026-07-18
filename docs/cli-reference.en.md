@@ -45,6 +45,22 @@ agent-rails run \
 
 With `--token-budget`, `pack` allocates sections by weight, redistributes unused category shares, and hard-caps the final token count. `huggingface` loads a local tokenizer from `--tokenizer-path`; `command` reads the file named by `AGENT_RAILS_TOKENIZER_INPUT`.
 
+### `pack`
+
+```bash
+agent-rails pack \
+  [--project PATH] \
+  [--profile PATH] \
+  [--task-file PATH] \
+  [--rubric-file PATH] \
+  [--pack-mode lite|normal|deep|audit] \
+  "goal"
+```
+
+Complex implementation and evaluation tasks should pass frozen task and rubric files explicitly. Relative paths resolve against the target project; absolute paths support private evaluation directories. Each input must be a regular, non-symlink, strict UTF-8 text file and is sensitive-output redacted before entering the Task Pack.
+
+Explicit files enter the protected Product Contract in full and produce stable `AC-*` / `RUB-*` identifiers plus an Acceptance Evidence Matrix. If a hard token budget cannot contain the complete contract, `pack` fails instead of silently truncating it. It also refuses to generate when the goal claims an attached or frozen contract but no file was supplied, preventing the agent from guessing missing requirements. Profile verification commands take precedence; otherwise `pack` detects suggestions from project structure and uses task-relevant code evidence to select a verification scope for a clean worktree.
+
 ### `verify`
 
 ```bash

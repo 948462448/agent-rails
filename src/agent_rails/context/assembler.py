@@ -25,6 +25,7 @@ SECTION_RULES = {
     "Session Marker": ("mandatory", 100, 80),
     "Goal": ("mandatory", 110, 160),
     "Context Budget": ("mandatory", 115, 180),
+    "Product Contract": ("mandatory", 120, 0),
     "Current Git State": ("mandatory", 100, 160),
     "Changed Files": ("git", 70, 0),
     "Changed File Priority": ("git", 85, 0),
@@ -396,6 +397,12 @@ def allocate_sections(
     desired_minimums: dict[int, int] = {}
     for section in sections:
         section.full_tokens, _ = counter.count(section.text)
+        if section.name == "Product Contract":
+            section.structure_text = section.text
+            section.structure_tokens = section.full_tokens
+            section.minimum = section.full_tokens
+            desired_minimums[section.index] = section.full_tokens
+            continue
         configured_minimum = min(section.minimum, section.full_tokens)
         section.structure_text = _section_structure(section.text)
         section.structure_tokens, _ = counter.count(section.structure_text)

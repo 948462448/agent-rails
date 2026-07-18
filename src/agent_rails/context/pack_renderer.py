@@ -61,6 +61,7 @@ class RenderedPackSections:
     memory_evidence: str
     verification_suggestions: str
     delivery_checklist: str
+    product_contract: str = ""
 
 
 @dataclass(frozen=True)
@@ -116,8 +117,9 @@ def render_task_pack(request: TaskPackRenderRequest) -> str:
             section_values[4],
             section_values[5],
             section_values[6],
+            section_values[7],
             verification,
-            section_values[8],
+            section_values[9],
         )
     )
     _strict_utf8(content)
@@ -369,6 +371,7 @@ def _complete_lines(text: str, budget: int) -> str:
 
 def _section_values(sections: RenderedPackSections) -> Tuple[str, ...]:
     values = (
+        sections.product_contract,
         sections.git_evidence,
         sections.project_docs_entry,
         sections.task_model,
@@ -380,6 +383,7 @@ def _section_values(sections: RenderedPackSections) -> Tuple[str, ...]:
         sections.delivery_checklist,
     )
     names = (
+        "product contract",
         "git evidence",
         "project docs entry",
         "task model",
@@ -416,7 +420,11 @@ def _validate_structure(
     names = tuple(
         section.name for section in sections if section.name != "__preamble__"
     )
-    required = tuple(SECTION_RULES)
+    required = tuple(
+        name
+        for name in SECTION_RULES
+        if name != "Product Contract" or name in names
+    )
     agent_contract = next(
         (
             section.text

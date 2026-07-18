@@ -136,7 +136,12 @@ def detect_verification_commands(project_root: Path) -> VerificationCommands:
         java_command = "./gradlew test"
     elif any(
         (project_root / name).is_file()
-        for name in ("build.gradle", "settings.gradle")
+        for name in (
+            "build.gradle",
+            "build.gradle.kts",
+            "settings.gradle",
+            "settings.gradle.kts",
+        )
     ):
         java_command = "gradle test"
 
@@ -177,7 +182,7 @@ def render_profile(
         'AGENT_RAILS_ONLINE_MEMORY_LIMIT="${AGENT_RAILS_ONLINE_MEMORY_LIMIT:-5}"',
         'AGENT_RAILS_ONLINE_MEMORY_TIMEOUT_SECONDS="${AGENT_RAILS_ONLINE_MEMORY_TIMEOUT_SECONDS:-8}"',
         "",
-        "# Model preset and context budget. Use qwen3.7-max, glm5.1, or deepseek-v4-pro when applicable.",
+        "# Model preset and context budget. Use qwen3.7-max, glm5.1, deepseek-v4-pro, or deepseek-v4-flash when applicable.",
         'AGENT_RAILS_MODEL="${AGENT_RAILS_MODEL:-generic}"',
         'AGENT_RAILS_PACK_MODE="${AGENT_RAILS_PACK_MODE:-normal}"',
         'AGENT_RAILS_CONTEXT_BUDGET_TOKENS="${AGENT_RAILS_CONTEXT_BUDGET_TOKENS:-}"',

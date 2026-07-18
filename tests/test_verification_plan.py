@@ -111,6 +111,23 @@ class VerificationPlanTest(unittest.TestCase):
             )
             self.assertEqual(plan.steps[0].command, "shared-check")
 
+    def test_clean_task_scope_uses_non_changed_reason_and_kotlin_dsl(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-task-plan-") as temp_dir:
+            project = Path(temp_dir)
+            plan = build_verification_plan(
+                VerificationPlanRequest(
+                    project=project,
+                    changed_paths=("app/build.gradle.kts",),
+                    commands=VerificationCommands(java="./gradlew test"),
+                    path_label="task scope",
+                )
+            )
+
+            self.assertEqual(
+                plan.steps,
+                (VerificationStep("java/jvm task scope", "./gradlew test"),),
+            )
+
     def test_test_override_and_fixed_suite_order(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-tests-plan-") as temp_dir:
             project = Path(temp_dir)

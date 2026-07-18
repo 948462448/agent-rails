@@ -22,6 +22,7 @@ from agent_rails.context.pack_application import (
     PackCliOverrides,
     generate_task_pack,
 )
+from agent_rails.context.task_contract import TaskContractError
 
 
 class PackApplicationTest(unittest.TestCase):
@@ -59,18 +60,24 @@ class PackApplicationTest(unittest.TestCase):
         requested_project: Path | None = None,
         target_ref: str = "HEAD",
         target_ref_explicit: bool = False,
+        goal: str = "application service refactor",
+        task_file: str | None = None,
+        rubric_file: str | None = None,
+        context_budget_chars: str = "4000",
     ) -> PackApplicationRequest:
         return PackApplicationRequest(
             requested_project=requested_project or self.repo,
             kit_home=ROOT,
             explicit_profile=str(self.profile),
-            goal="application service refactor",
+            goal=goal,
             overrides=PackCliOverrides(
                 target_ref=target_ref,
                 target_ref_explicit=target_ref_explicit,
                 output=output,
-                context_budget_chars="4000",
+                context_budget_chars=context_budget_chars,
                 pack_mode="lite",
+                task_file=task_file,
+                rubric_file=rubric_file,
             ),
             environment={
                 "HOME": str(self.root / "home"),
@@ -175,6 +182,80 @@ class PackApplicationTest(unittest.TestCase):
             "Run agent-rails check after it is available.",
             output.read_text(encoding="utf-8"),
         )
+
+    def test_explicit_contract_drives_acceptance_and_clean_scope_verification(self) -> None:
+        (self.repo / "app").mkdir()
+        (self.repo / "app" / "PlayerContract.kt").write_text(
+            "class PlayerContract\n",
+            encoding="utf-8",
+        )
+        (self.repo / "gradlew").write_text("#!/bin/sh\n", encoding="utf-8")
+        self._git("add", "app/PlayerContract.kt", "gradlew")
+        self._git("commit", "-qm", "android fixture")
+        task = self.root / "task.md"
+        rubric = self.root / "rubric.md"
+        task.write_text(
+            "# VP-006\n\n1. Preserve the full contract.\n"
+            "2. Prove the behavior before delivery.\n",
+            encoding="utf-8",
+        )
+        rubric.write_text("- Missing evidence caps the score.\n", encoding="utf-8")
+        output = self.root / "contract-pack.md"
+
+        generate_task_pack(
+            self._request(
+                output=str(output),
+                goal="Implement the explicit player contract.",
+                task_file=str(task),
+                rubric_file=str(rubric),
+                context_budget_chars="0",
+            )
+        )
+        content = output.read_text(encoding="utf-8")
+
+        self.assertIn("## Product Contract", content)
+        self.assertIn("1. Preserve the full contract.", content)
+        self.assertIn("AC-001 [task] [VP-006] Preserve the full contract.", content)
+        self.assertIn("RUB-001 [rubric] Missing evidence caps the score.", content)
+        self.assertIn("[java/jvm task scope] ./gradlew test", content)
+
+        self.profile.write_text(
+            self.profile.read_text(encoding="utf-8")
+            + "VERIFY_PROJECT='./gradlew test assembleDebug --no-daemon'\n",
+            encoding="utf-8",
+        )
+        configured_output = self.root / "configured-contract-pack.md"
+        generate_task_pack(
+            self._request(
+                output=str(configured_output),
+                goal="Implement the explicit player contract.",
+                task_file=str(task),
+                rubric_file=str(rubric),
+                context_budget_chars="0",
+            )
+        )
+        configured = configured_output.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "[project default] ./gradlew test assembleDebug --no-daemon",
+            configured,
+        )
+        self.assertNotIn("[java/jvm task scope] ./gradlew test\n", configured)
+
+    def test_missing_attached_contract_fails_before_replacing_pack(self) -> None:
+        output = self.root / "missing-contract.md"
+        output.write_text("keep old\n", encoding="utf-8")
+
+        with self.assertRaises(TaskContractError):
+            generate_task_pack(
+                self._request(
+                    output=str(output),
+                    goal="Implement the attached frozen contract.",
+                    context_budget_chars="0",
+                )
+            )
+
+        self.assertEqual(output.read_text(encoding="utf-8"), "keep old\n")
 
     def test_pack_policy_is_resolved_once_and_profile_is_allowlisted(self) -> None:
         with patch.object(

@@ -82,6 +82,7 @@ from .context.pack_application import (
     PackCliOverrides,
     generate_task_pack,
 )
+from .context.task_contract import TaskContractError
 from .context.pack_policy import PackPolicyInput, resolve_pack_policy
 from .context.pack_renderer import (
     PackRendererError,
@@ -1798,6 +1799,7 @@ def _print_memory_published(published: Sequence[PublishedArtifact]) -> None:
 _TASK_PACK_USAGE = (
     "Usage: agent-rails pack [--profile PATH] [--base REF] "
     "[--target-ref REF] [--output PATH] [--model NAME] "
+    "[--task-file PATH] [--rubric-file PATH] "
     "[--pack-mode lite|normal|deep|audit] [--budget CHARS] "
     "[--token-budget TOKENS] "
     "[--tokenizer auto|char|tiktoken|command|huggingface] "
@@ -1823,6 +1825,8 @@ def _task_pack(args: Sequence[str]) -> int:
         "--tokenizer": "tokenizer",
         "--tokenizer-command": "tokenizer_command",
         "--tokenizer-path": "tokenizer_path",
+        "--task-file": "task_file",
+        "--rubric-file": "rubric_file",
     }
     while index < len(args):
         argument = args[index]
@@ -1866,6 +1870,8 @@ def _task_pack(args: Sequence[str]) -> int:
                     tokenizer=values.get("tokenizer"),
                     tokenizer_command=values.get("tokenizer_command"),
                     tokenizer_path=values.get("tokenizer_path"),
+                    task_file=values.get("task_file"),
+                    rubric_file=values.get("rubric_file"),
                 ),
                 environment=dict(os.environ),
             )
@@ -1885,6 +1891,7 @@ def _task_pack(args: Sequence[str]) -> int:
         ChangeEvidenceError,
         ProjectDocsError,
         ContractSectionsError,
+        TaskContractError,
         MemoryEvidenceError,
         PackApplicationError,
     ) as exc:

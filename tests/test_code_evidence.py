@@ -173,6 +173,14 @@ class CodeEvidenceTest(unittest.TestCase):
         self.assertNotIn("agent-rails", tokens)
         self.assertIn("登录", tokens)
         self.assertIn("校验", tokens)
+        self.assertLessEqual(len(tokens), 6)
+
+    def test_common_english_words_do_not_outrank_task_terms(self) -> None:
+        tokens = select_code_tokens(
+            "Update all the files using the contract acceptance verifier"
+        )
+
+        self.assertEqual(tokens, ("contract", "acceptance", "verifier"))
 
     def test_git_search_stops_reading_after_bounded_path_count(self) -> None:
         payload = b"".join(

@@ -23,7 +23,8 @@ _PYTHON = re.compile(
     r"(^pyproject\.toml$|^requirements.*\.txt$|^setup\.py$|^pytest\.ini$|\.py$)"
 )
 _JAVA = re.compile(
-    r"(^pom\.xml$|^mvnw$|^build\.gradle$|^settings\.gradle$|\.java$|\.kt$)"
+    r"(^pom\.xml$|^mvnw$|(^|/)build\.gradle(?:\.kts)?$|"
+    r"(^|/)settings\.gradle(?:\.kts)?$|\.java$|\.kt$|\.kts$)"
 )
 _GO = re.compile(r"(^go\.mod$|^go\.sum$|\.go$)")
 _RUST = re.compile(r"(^Cargo\.toml$|^Cargo\.lock$|\.rs$)")
@@ -73,6 +74,7 @@ class VerificationPlanRequest:
     commands: VerificationCommands
     target_ref: str = "HEAD"
     target_ref_explicit: bool = False
+    path_label: str = "changed"
 
 
 @dataclass(frozen=True)
@@ -101,24 +103,24 @@ def build_verification_plan(request: VerificationPlanRequest) -> VerificationPla
         seen_commands.add(command)
 
     matchers: Tuple[Tuple[re.Pattern[str], str, str], ...] = (
-        (_CONTRACTS, "contracts changed", request.commands.contracts),
-        (_BACKEND, "backend changed", request.commands.backend),
-        (_RUNTIME, "runtime changed", request.commands.runtime),
-        (_FRONTEND, "frontend changed", request.commands.frontend),
-        (_NODE, "node/js changed", request.commands.node),
-        (_PYTHON, "python changed", request.commands.python),
-        (_JAVA, "java/jvm changed", request.commands.java),
-        (_GO, "go changed", request.commands.go),
-        (_RUST, "rust changed", request.commands.rust),
+        (_CONTRACTS, _path_reason("contracts", request.path_label), request.commands.contracts),
+        (_BACKEND, _path_reason("backend", request.path_label), request.commands.backend),
+        (_RUNTIME, _path_reason("runtime", request.path_label), request.commands.runtime),
+        (_FRONTEND, _path_reason("frontend", request.path_label), request.commands.frontend),
+        (_NODE, _path_reason("node/js", request.path_label), request.commands.node),
+        (_PYTHON, _path_reason("python", request.path_label), request.commands.python),
+        (_JAVA, _path_reason("java/jvm", request.path_label), request.commands.java),
+        (_GO, _path_reason("go", request.path_label), request.commands.go),
+        (_RUST, _path_reason("rust", request.path_label), request.commands.rust),
     )
     for pattern, reason, command in matchers:
         if _has_changed(paths, pattern):
             add(reason, command)
 
     if _has_changed(paths, _DOLPHIN_PYTHON):
-        add("dolphin python changed", request.commands.dolphin)
+        add(_path_reason("dolphin python", request.path_label), request.commands.dolphin)
     elif _has_changed(paths, _DOLPHIN):
-        add("dolphin changed", request.commands.dolphin)
+        add(_path_reason("dolphin", request.path_label), request.commands.dolphin)
 
     shell_paths = tuple(path for path in paths if _SHELL_ENTRYPOINT.search(path))
     if shell_paths:
@@ -129,10 +131,10 @@ def build_verification_plan(request: VerificationPlanRequest) -> VerificationPla
             command = request.commands.shell or _default_shell_command(
                 existing_shell_paths
             )
-            add("shell entrypoints changed", command)
+            add(_path_reason("shell entrypoints", request.path_label), command)
 
     if _has_changed(paths, _SHELL_TEST):
-        add("shell tests changed", _test_command(request))
+        add(_path_reason("shell tests", request.path_label), _test_command(request))
 
     if paths and not steps:
         add("project default", request.commands.project)
@@ -179,6 +181,11 @@ def write_verification_plan_bundle(
 
 def _has_changed(paths: Tuple[str, ...], pattern: re.Pattern[str]) -> bool:
     return any(pattern.search(path) is not None for path in paths)
+
+
+def _path_reason(subject: str, label: str) -> str:
+    _reject_nul(label, "verification path label")
+    return f"{subject} {label}".strip()
 
 
 def _verification_file_exists(

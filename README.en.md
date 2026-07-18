@@ -115,6 +115,17 @@ passes an executed Verify run, Agent Rails publishes a private Memory Candidate
 for explicit curator review. It does not write a local memory card, retain raw
 failure output, or copy Profile command text.
 
+When the task or rubric is frozen, pass the source documents to Task Pack so an
+abbreviated goal cannot lose acceptance details:
+
+```bash
+agent-rails pack --task-file task.md --rubric-file rubric.md "implement the frozen contract"
+```
+
+The complete contract is never silently truncated to fit a token budget. The
+command fails when the budget is too small or when the goal names an attached
+contract without supplying its file.
+
 It selects and executes checks from the actual changes. Before a release or deployment, provide the source revision currently deployed when known:
 
 ```bash

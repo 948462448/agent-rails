@@ -255,6 +255,28 @@ JSON 对象。
 `winner` 只能是 `A`、`B` 或 `tie`。模型供应商调用放在你自己的 wrapper 中，通过
 环境变量或 TUI/CLI 登录态获取鉴权；不要把 token 写进 `--judge-cmd` 或评测文件。
 
+仓库内置了一个不依赖供应商 SDK 的 OpenAI-compatible wrapper：
+`tools/openai_compatible_judge.py`。它把盲评 prompt 作为 user message，并用独立的
+system message 固定软件工程裁判角色、证据优先级和 prompt-injection 边界。密钥按
+默认从 `AGENT_RAILS_JUDGE_API_KEY` 读取；不要把密钥放进命令行。需要复用其他变量时，
+在 `--judge-cmd` 中传 `--api-key-env VARIABLE_NAME`，仍然只传变量名。为避免不同套餐
+发生意外计费或鉴权失败，wrapper 不猜测默认 endpoint，必须显式配置。
+
+阿里云 Token Plan（团队版）使用套餐专属 API key 和 Base URL；它们不能与 Coding
+Plan 或按量付费配置混用。当前 Token Plan 支持 `glm-5.2`，适合作为与 DeepSeek
+不同模型家族的主裁判。例如先设置：
+
+```bash
+export AGENT_RAILS_JUDGE_MODEL='glm-5.2'
+export AGENT_RAILS_JUDGE_BASE_URL='https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'
+# 在当前 shell 或密钥管理器中设置 AGENT_RAILS_JUDGE_API_KEY。
+```
+
+模型白名单和 endpoint 可能更新，运行前以[阿里云 Token Plan
+文档](https://help.aliyun.com/zh/model-studio/token-plan-quickstart)为准。
+
+随后把 `--judge-cmd` 指向仓库内 wrapper：
+
 运行盲评：
 
 ```bash
@@ -263,14 +285,30 @@ python3 tools/ab_eval.py judge \
   --rubric /tmp/ab-case/rubric.md \
   --candidate-a /tmp/ab-case/off.json \
   --candidate-b /tmp/ab-case/rails-lite.json \
-  --judge-cmd "python3 /path/to/judge_wrapper.py" \
-  --judge-model your-judge-model \
+  --judge-cmd "python3 tools/openai_compatible_judge.py" \
+  --judge-model "$AGENT_RAILS_JUDGE_MODEL" \
   --output-dir /tmp/ab-case/judgment
 ```
 
-默认执行两轮：第一轮随机匿名为 Response A/B，第二轮交换位置。只有两轮揭盲后都
-映射到同一个实验组，`position_check` 才是 `consistent`。结果冲突时返回
-`final_winner=split` 和 `position_check=position-sensitive`，不能强行判胜。
+默认请求 JSON mode。若某个 compatible 模型明确不支持 `response_format`，在
+`--judge-cmd` 中追加 `--no-response-format`；wrapper 仍会验证模型只返回一个 JSON
+对象。远程 endpoint 必须使用 HTTPS，明文 HTTP 只允许 loopback 测试服务。
+
+默认执行两轮：第一轮随机匿名为 Response A/B，第二轮交换位置。聚合语义如下：
+
+- 两轮映射到同一个候选（或都为 tie）：`position_check=consistent`；
+- 一轮 tie、另一轮映射到某个候选：该候选作为 `final_winner`，同时标记
+  `position_check=weak-consensus`，表示方向一致但证据较弱；
+- 两轮分别映射到两个不同候选：`final_winner=split` 且
+  `position_check=position-sensitive`，不能强行判胜。
+
+需要核查分歧理由中的具体代码事实时，追加 `--fact-check-disagreement`。工具只在
+`weak-consensus` 或 `position-sensitive` 时使用同一个 `--judge-cmd` 再调用一次，
+把两轮理由与匿名候选交给事实复核 prompt。复核逐条输出
+`supported|unsupported|uncertain`；只要存在 unsupported 或 uncertain，结果中的
+`review_status` 就是 `needs-review`。事实复核不会静默改写 `final_winner`，原始轮次、
+复核 prompt 和响应都会保留。该选项会增加一次 judge 调用和相应 token 消耗，默认
+关闭。
 
 ## 盲评保证与边界
 

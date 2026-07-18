@@ -156,9 +156,9 @@ test_update_claude_dry_run_sequences_project_refresh() {
   fi
   assert_contains "$output" "Skip tests (--skip-tests)."
   assert_contains "$output" "Run pre-upgrade doctor"
-  assert_contains "$output" "Would run: $AGENT_RAILS_BIN doctor --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN_DISPLAY doctor --project"
   assert_contains "$output" "Refresh target adapter and skills"
-  assert_contains "$output" "$AGENT_RAILS_BIN claude install --project"
+  assert_contains "$output" "$AGENT_RAILS_BIN_DISPLAY claude install --project"
   assert_not_contains "$output" "agent-install-claude.sh"
   assert_contains "$output" "--session-hook"
   assert_contains "$output" "Run final doctor"
@@ -173,8 +173,8 @@ test_update_codex_uses_codex_install_and_doctor() {
 
   assert_contains "$output" "Tool: codex"
   assert_contains "$output" "Adapter mode: local"
-  assert_contains "$output" "Would run: $AGENT_RAILS_BIN codex doctor --project"
-  assert_contains "$output" "Would run: $AGENT_RAILS_BIN codex install --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN_DISPLAY codex doctor --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN_DISPLAY codex install --project"
   assert_contains "$output" "--fix-project"
   assert_contains "$output" "--mode local"
   assert_not_contains "$output" "claude install"
@@ -190,8 +190,8 @@ test_update_opencode_uses_selected_adapter_mode() {
 
   assert_contains "$output" "Tool: opencode"
   assert_contains "$output" "Adapter mode: project"
-  assert_contains "$output" "Would run: $AGENT_RAILS_BIN opencode doctor --project"
-  assert_contains "$output" "Would run: $AGENT_RAILS_BIN opencode install --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN_DISPLAY opencode doctor --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN_DISPLAY opencode install --project"
   assert_contains "$output" "--mode project"
   assert_not_contains "$output" "claude install"
   assert_not_contains "$output" "codex install"
@@ -688,7 +688,7 @@ test_setup_claude_dry_run_uses_local_adapter_and_doctor() {
   assert_contains "$output" "Tool: claude"
   assert_contains "$output" "Claude adapter ready"
   assert_contains "$output" "Session Hook:"
-  assert_contains "$output" "Would run: $AGENT_RAILS_BIN doctor --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN_DISPLAY doctor --project"
   assert_contains "$output" "Agent Rails setup complete."
   assert_file_not_exists "$repo/.claude/AGENT_RAILS.md"
 }
@@ -747,7 +747,7 @@ test_setup_auto_detects_single_tool() {
   assert_contains "$output" "Detected tool: opencode"
   assert_contains "$output" "Tool: opencode"
   assert_contains "$output" "Agent Rails opencode Install"
-  assert_contains "$output" "Would run: $AGENT_RAILS_BIN opencode doctor --project"
+  assert_contains "$output" "Would run: $AGENT_RAILS_BIN_DISPLAY opencode doctor --project"
 }
 
 test_setup_auto_requires_choice_for_multiple_tools() {

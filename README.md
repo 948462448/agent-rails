@@ -105,6 +105,11 @@ agent-rails verify
 会要求更换排查策略，第三次会停止盲目重试并要求总结已证事实、排除项和下一条可证伪
 假设；成功验证会清零连续失败状态。私有历史只保存脱敏指纹和有界计数。
 
+Task Pack 还会根据代码证据和 Verification Plan 提供 Task Model：行为不变量、修改
+计划、验收条件、禁止范围和未决假设。它不会把候选位置伪装成根因或业务结论。若同一
+固定 target 曾验证失败、随后真实验证成功，Verify 会生成一个私有 Memory Candidate，
+供 curator 显式审核；它不自动写入本地 memory 卡片，也不保存失败日志或 Profile 命令正文。
+
 它会根据真实改动选择并执行合适的检查。发布或部署时，如果你知道线上当前使用的源码 revision：
 
 ```bash
@@ -144,7 +149,7 @@ agent-rails upgrade self
 回滚或固定到已发布版本：
 
 ```bash
-agent-rails upgrade self --version 0.6.1
+agent-rails upgrade self --version 0.7.0
 ```
 
 要同时更新 CLI、运行检查并刷新当前项目的 Adapter，显式选择正在使用的 coding agent。例如 OpenCode：

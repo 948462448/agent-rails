@@ -20,6 +20,7 @@ from agent_rails.verification.failure_protocol import (  # noqa: E402
     clear_failure_history,
     failure_history_path,
     observe_failure,
+    read_failure_history,
 )
 from agent_rails.verification.repair_pack import VerificationFailure  # noqa: E402
 
@@ -97,6 +98,18 @@ class FailureProtocolTest(unittest.TestCase):
 
             self.assertEqual(result.consecutive_count, 1)
             self.assertEqual(result.action, FailureAction.REPAIR)
+
+    def test_read_history_exposes_only_matching_bounded_metadata(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-rails-failure-history-") as temp:
+            state = Path(temp) / "history.json"
+            observed = observe_failure(state, "target-a", self.failure())
+
+            history = read_failure_history(state, "target-a")
+
+            self.assertIsNotNone(history)
+            self.assertEqual(history.fingerprint, observed.fingerprint)
+            self.assertEqual(history.consecutive_count, 1)
+            self.assertIsNone(read_failure_history(state, "target-b"))
 
     def test_private_state_contains_only_bounded_fingerprints(self) -> None:
         with tempfile.TemporaryDirectory(prefix="agent-rails-failure-private-") as temp:

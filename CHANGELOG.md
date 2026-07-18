@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-07-18
 
+- Added an evidence-backed Task Model to every Task Pack: deterministic behavior invariants, change plan, acceptance criteria, boundaries, and explicit open assumptions now combine Goal, frozen Code Evidence, changed paths, and the shared Verification Plan without fabricating business semantics or root causes.
+- Added private verified-repair Memory Candidates. Only a same-target failed Verify followed by an executed successful Verify can publish the bounded draft; it retains a fingerprint, scope, and passed verification categories, omits raw output and Profile commands, does not affect Verify exit status, and never auto-writes local memory.
 - Added a Verification Failure Protocol that keeps only a private redacted fingerprint and capped consecutive count, changes strategy on the second matching failure, escalates on the third, clears after successful verification, and never changes the original Check exit semantics when history is unavailable.
 - Added a review-stage Local Brain design covering a bounded Capability Catalog, recommend-only skill/tool decisions, optional off/shadow/assist modes, deterministic fallback, fixed-snapshot reads, strict external Adapter JSON, Task/Repair Code Evidence decisions, Doctor integration, safety constraints, implementation slices, deferred paired evaluation, and an offline SFT/DPO/GRPO learning roadmap with explicit MLX promotion gates.
 - Bounded Code Evidence search at the I/O layer: tracked-path matches now stream as NUL-delimited records under byte and file-count caps, and the isolated Git process group stops as soon as enough candidates have been collected.

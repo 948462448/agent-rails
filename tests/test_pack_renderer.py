@@ -44,6 +44,10 @@ class PackRendererTest(unittest.TestCase):
                 "## Relevant Entry Docs\n\n- `AGENTS.md`\n\n"
                 "## Context Gaps\n\n- None.\n\n"
             ),
+            task_model=(
+                "## Task Model\n\n"
+                "### Behavior Invariants\n\n- Keep behavior.\n\n"
+            ),
             agent_contract=(
                 "## Agent Rails Contract\n\n"
                 "### Trigger Matrix\n\n- Keep scope.\n\n"
@@ -102,6 +106,7 @@ class PackRendererTest(unittest.TestCase):
             "Working Tree Status",
             "Relevant Entry Docs",
             "Context Gaps",
+            "Task Model",
             "Agent Rails Contract",
             "Subagent Result Contract",
             "Project Configuration",

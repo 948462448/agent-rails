@@ -92,6 +92,7 @@ class PackApplicationTest(unittest.TestCase):
         self.assertEqual(result.output.filesystem_path, expected)
         self.assertTrue(expected.is_file())
         self.assertEqual(expected.stat().st_mode & 0o777, 0o600)
+        self.assertIn("## Task Model", expected.read_text(encoding="utf-8"))
 
     def test_profile_and_environment_file_are_loaded_once(self) -> None:
         profile_count = self.root / "profile-count"

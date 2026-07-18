@@ -107,6 +107,14 @@ the third stops blind retries in favor of proven facts and the next falsifiable
 hypothesis. A successful verification clears the private, fingerprint-only
 recurrence state.
 
+Task Pack also renders a Task Model from Code Evidence and the Verification
+Plan: behavior invariants, a change plan, acceptance criteria, boundaries, and
+open assumptions. Candidate locations never claim to be root cause or product
+conclusions. If one fixed target previously failed verification and later
+passes an executed Verify run, Agent Rails publishes a private Memory Candidate
+for explicit curator review. It does not write a local memory card, retain raw
+failure output, or copy Profile command text.
+
 It selects and executes checks from the actual changes. Before a release or deployment, provide the source revision currently deployed when known:
 
 ```bash
@@ -146,7 +154,7 @@ agent-rails upgrade self
 Roll back or pin to a published version:
 
 ```bash
-agent-rails upgrade self --version 0.6.1
+agent-rails upgrade self --version 0.7.0
 ```
 
 To update the CLI, run checks, and refresh the current project's Adapter in one maintenance flow, choose the coding agent explicitly. For OpenCode:

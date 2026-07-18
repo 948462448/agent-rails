@@ -65,6 +65,12 @@ class FailureEvidence:
 
 
 @dataclass(frozen=True)
+class FailureHistory:
+    fingerprint: str
+    consecutive_count: int
+
+
+@dataclass(frozen=True)
 class _FailureState:
     target_fingerprint: str
     failure_fingerprint: str
@@ -151,6 +157,25 @@ def clear_failure_history(state_path: Optional[Path]) -> bool:
     return _publish_payload(
         state_path,
         json.dumps({"format": _FORMAT, "cleared": True}, sort_keys=True) + "\n",
+    )
+
+
+def read_failure_history(
+    state_path: Optional[Path], target_identity: str
+) -> Optional[FailureHistory]:
+    """Return bounded prior failure metadata for one fixed verification target."""
+
+    if state_path is None:
+        return None
+    previous, safe = _read_state(state_path)
+    expected_target = hashlib.sha256(
+        (target_identity or "non-git").encode("utf-8", errors="surrogateescape")
+    ).hexdigest()
+    if not safe or previous is None or previous.target_fingerprint != expected_target:
+        return None
+    return FailureHistory(
+        fingerprint=previous.failure_fingerprint,
+        consecutive_count=previous.consecutive_count,
     )
 
 

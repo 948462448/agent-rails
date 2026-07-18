@@ -1454,6 +1454,7 @@ def _copy_skill_tree_into_project(
     parent, name = _open_project_parent(project, target, create=True)
     source = -1
     stage = ""
+    stage_descriptor = -1
     backup = ""
     preserve_backup = False
     installed_fingerprint = ""
@@ -1478,15 +1479,17 @@ def _copy_skill_tree_into_project(
                 stage_descriptor,
                 target,
             )
-        finally:
+        except BaseException:
             os.close(stage_descriptor)
+            stage_descriptor = -1
+            raise
 
         try:
             existing = os.stat(name, dir_fd=parent, follow_symlinks=False)
         except FileNotFoundError:
             if expected_target_fingerprint is not None and not force:
                 return None
-            os.rename(stage, name, src_dir_fd=parent, dst_dir_fd=parent)
+            _rename_directory_preserving_mode(parent, stage, name)
             stage = ""
         else:
             if stat.S_ISLNK(existing.st_mode) or not stat.S_ISDIR(existing.st_mode):
@@ -1496,7 +1499,7 @@ def _copy_skill_tree_into_project(
             if expected_target_fingerprint is None and not force:
                 return None
             backup = _unused_name_at(parent, f".{name}.agent-rails-old")
-            os.rename(name, backup, src_dir_fd=parent, dst_dir_fd=parent)
+            _rename_directory_preserving_mode(parent, name, backup)
             if not force:
                 try:
                     current_fingerprint = _fingerprint_named_skill(
@@ -1508,22 +1511,22 @@ def _copy_skill_tree_into_project(
                     current_fingerprint = None
                 except BaseException:
                     preserve_backup = True
-                    os.rename(backup, name, src_dir_fd=parent, dst_dir_fd=parent)
+                    _rename_directory_preserving_mode(parent, backup, name)
                     backup = ""
                     preserve_backup = False
                     raise
                 if current_fingerprint != expected_target_fingerprint:
                     preserve_backup = True
-                    os.rename(backup, name, src_dir_fd=parent, dst_dir_fd=parent)
+                    _rename_directory_preserving_mode(parent, backup, name)
                     backup = ""
                     preserve_backup = False
                     return None
             try:
-                os.rename(stage, name, src_dir_fd=parent, dst_dir_fd=parent)
+                _rename_directory_preserving_mode(parent, stage, name)
                 stage = ""
             except BaseException:
                 preserve_backup = True
-                os.rename(backup, name, src_dir_fd=parent, dst_dir_fd=parent)
+                _rename_directory_preserving_mode(parent, backup, name)
                 backup = ""
                 preserve_backup = False
                 raise
@@ -1534,27 +1537,12 @@ def _copy_skill_tree_into_project(
                     parent,
                     f".{name}.agent-rails-failed",
                 )
-                os.rename(
-                    name,
-                    replacement,
-                    src_dir_fd=parent,
-                    dst_dir_fd=parent,
-                )
+                _rename_directory_preserving_mode(parent, name, replacement)
                 try:
-                    os.rename(
-                        backup,
-                        name,
-                        src_dir_fd=parent,
-                        dst_dir_fd=parent,
-                    )
+                    _rename_directory_preserving_mode(parent, backup, name)
                 except BaseException:
                     preserve_backup = True
-                    os.rename(
-                        replacement,
-                        name,
-                        src_dir_fd=parent,
-                        dst_dir_fd=parent,
-                    )
+                    _rename_directory_preserving_mode(parent, replacement, name)
                     raise
                 backup = ""
                 try:
@@ -1566,6 +1554,8 @@ def _copy_skill_tree_into_project(
     finally:
         if source >= 0:
             os.close(source)
+        if stage_descriptor >= 0:
+            os.close(stage_descriptor)
         if stage:
             try:
                 _remove_tree_at(parent, stage)
@@ -1751,7 +1741,7 @@ def _remove_project_path(
             return True
         if stat.S_ISDIR(current.st_mode) and not stat.S_ISLNK(current.st_mode):
             tombstone = _unused_name_at(parent, f".{name}.agent-rails-remove")
-            os.rename(name, tombstone, src_dir_fd=parent, dst_dir_fd=parent)
+            _rename_directory_preserving_mode(parent, name, tombstone)
             if not force:
                 try:
                     actual_fingerprint = _fingerprint_named_skill(
@@ -1762,13 +1752,13 @@ def _remove_project_path(
                 except ManagedAdapterWorkspaceError:
                     actual_fingerprint = None
                 except BaseException:
-                    os.rename(tombstone, name, src_dir_fd=parent, dst_dir_fd=parent)
+                    _rename_directory_preserving_mode(parent, tombstone, name)
                     raise
                 if (
                     expected_fingerprint is None
                     or actual_fingerprint != expected_fingerprint
                 ):
-                    os.rename(tombstone, name, src_dir_fd=parent, dst_dir_fd=parent)
+                    _rename_directory_preserving_mode(parent, tombstone, name)
                     return False
             _remove_tree_at(parent, tombstone)
         else:
@@ -1778,6 +1768,28 @@ def _remove_project_path(
         return True
     finally:
         os.close(parent)
+
+
+def _rename_directory_preserving_mode(
+    parent: int,
+    source: str,
+    destination: str,
+) -> None:
+    directory = os.open(source, _directory_flags(), dir_fd=parent)
+    mode = stat.S_IMODE(os.fstat(directory).st_mode)
+    renamed = False
+    try:
+        os.fchmod(directory, mode | stat.S_IRWXU)
+        os.rename(source, destination, src_dir_fd=parent, dst_dir_fd=parent)
+        renamed = True
+        os.fchmod(directory, mode)
+    except BaseException:
+        if renamed:
+            os.rename(destination, source, src_dir_fd=parent, dst_dir_fd=parent)
+        os.fchmod(directory, mode)
+        raise
+    finally:
+        os.close(directory)
 
 
 def _remove_tree_at(parent: int, name: str) -> None:

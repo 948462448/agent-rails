@@ -498,6 +498,8 @@ class ManagedAdapterWorkspaceTest(unittest.TestCase):
             self.assertEqual((target / "assets/data.txt").read_text(), "managed\n")
             self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o555)
             self.assertEqual(stat.S_IMODE((target / "assets").stat().st_mode), 0o555)
+            workspace.install_skills()
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o555)
             workspace.remove_managed_skills()
             self.assertFalse(target.exists())
         finally:

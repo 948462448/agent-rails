@@ -24,6 +24,14 @@ from agent_rails.verification.check_application import (  # noqa: E402
     CheckCliOverrides,
     CheckExecutionResult,
     CheckMode,
+    PreparedCheck,
+)
+from agent_rails.memory.candidate import MemoryCandidateResult  # noqa: E402
+from agent_rails.verification.failure_protocol import FailureHistory  # noqa: E402
+from agent_rails.verification.plan import (  # noqa: E402
+    VerificationCommands,
+    VerificationPlan,
+    VerificationStep,
 )
 from agent_rails.verification.repair_pack import VerificationFailure  # noqa: E402
 from agent_rails.verification.publish_check import (  # noqa: E402
@@ -502,6 +510,63 @@ class VerifyApplicationTest(unittest.TestCase):
         self.assertIn("stop blind retries", third.stdout)
         self.assertEqual(success.exit_code, 0)
         self.assertIn("Consecutive occurrences: 1", after_success.stdout)
+
+    def test_verified_repair_publishes_candidate_without_memory_write(self) -> None:
+        context = self.context()
+        prepared = PreparedCheck(
+            project_root=self.project,
+            profile_path=str(self.profile),
+            is_git_repo=True,
+            requested_target_ref="HEAD",
+            target_ref_explicit=False,
+            target_sha="a" * 40,
+            head_sha="a" * 40,
+            resolved_base_ref="base",
+            merge_base="b" * 40,
+            changed_paths=("src/session.py",),
+            commands=VerificationCommands(),
+            plan=VerificationPlan(
+                steps=(VerificationStep("python changed", "private command"),)
+            ),
+            scope=None,
+            mode=CheckMode.RUN,
+            suppress_marker=False,
+            runner_shell="/bin/sh",
+            environment={},
+            worktree_fingerprint=None,
+        )
+        candidate = MemoryCandidateResult(
+            path=self.root / "candidate.md",
+            target_sha="a" * 40,
+            failure_fingerprint="b" * 64,
+        )
+
+        with (
+            patch.object(verify_module, "resolve_target_project", return_value=context),
+            patch.object(verify_module, "prepare_check", return_value=prepared),
+            patch.object(verify_module, "render_check_report", return_value=""),
+            patch.object(
+                verify_module,
+                "execute_check",
+                return_value=CheckExecutionResult(exit_code=0, completed_steps=1),
+            ),
+            patch.object(
+                verify_module,
+                "read_failure_history",
+                return_value=FailureHistory("b" * 64, 2),
+            ),
+            patch.object(
+                verify_module,
+                "publish_memory_candidate",
+                return_value=candidate,
+            ) as publish,
+        ):
+            result = run_verify(self.request())
+
+        publish.assert_called_once()
+        self.assertEqual(result.memory_candidate, candidate)
+        self.assertIn("Memory Candidate:", result.stdout)
+        self.assertIn("no local memory card was written", result.stdout)
 
     def test_check_runtime_error_preserves_prior_output_exit_and_sanitizes(self) -> None:
         context = self.context()

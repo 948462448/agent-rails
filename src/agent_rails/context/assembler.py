@@ -33,6 +33,7 @@ SECTION_RULES = {
     "Working Tree Status": ("git", 90, 0),
     "Relevant Entry Docs": ("git", 75, 0),
     "Context Gaps": ("git", 65, 0),
+    "Task Model": ("contract", 100, 160),
     "Agent Rails Contract": ("contract", 105, 240),
     "Subagent Result Contract": ("contract", 75, 0),
     "Project Configuration": ("contract", 60, 0),

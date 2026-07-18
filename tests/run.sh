@@ -7,6 +7,7 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 export AGENT_RAILS_HOME="$ROOT_DIR"
 AGENT_RAILS_BIN="$ROOT_DIR/bin/agent-rails"
+AGENT_RAILS_BIN_DISPLAY="$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$AGENT_RAILS_BIN")"
 EXPECTED_AGENT_RAILS_VERSION="$(awk 'NF { print $1; exit }' "$ROOT_DIR/VERSION")"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agent-rails-tests.XXXXXX")"
 TMP_ROOT="$(cd "$TMP_ROOT" && pwd -P)"
@@ -29,7 +30,7 @@ Usage: bash tests/run.sh [core|adapters|workflows|context ...]
        bash tests/run.sh --related [PATH ...]
        bash tests/run.sh --list-related [PATH ...]
 
-With no suite names, runs all 177 tests in their historical order.
+With no suite names, runs all 179 tests in their historical order.
 Related mode maps explicit paths, or current Git changes when no paths are
 given, to the smallest safe set of module suites.
 USAGE
@@ -111,7 +112,10 @@ select_related_path() {
       related_workflows=1
       related_context=1
       ;;
-    tests/test_context_assembler.py|tests/test_pack_*.py|tests/test_change_evidence.py|tests/test_memory_*.py|tests/test_project_docs.py|tests/test_contract_sections.py|tests/test_context_markdown.py|tests/test_private_text.py)
+    tests/test_memory_candidate.py)
+      related_workflows=1
+      ;;
+    tests/test_context_assembler.py|tests/test_pack_*.py|tests/test_task_model.py|tests/test_change_evidence.py|tests/test_memory_*.py|tests/test_project_docs.py|tests/test_contract_sections.py|tests/test_context_markdown.py|tests/test_private_text.py)
       related_context=1
       ;;
     tests/test_check_application.py|tests/test_publish_check_application.py|tests/test_verify_application.py|tests/test_run_application.py|tests/test_verification_plan.py|tests/test_repair_pack.py|tests/test_failure_protocol.py|tests/test_git_scope.py|tests/test_sensitive_output.py|tests/test_estimate.py|tests/test_target_project.py|tests/test_profile_init.py|tests/test_ab_eval.py)

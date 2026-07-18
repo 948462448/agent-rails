@@ -65,6 +65,28 @@ Clean.
 
 - None detected.
 
+## Task Model
+
+### Behavior Invariants
+
+- Preserve behavior outside the planned scope.
+
+### Change Plan
+
+- Inspect evidence before editing.
+
+### Acceptance Criteria
+
+- Demonstrate the requested outcome and run selected verification.
+
+### Do Not Change
+
+- Do not overwrite unrelated worktree changes.
+
+### Open Assumptions
+
+- Product-specific acceptance requires evidence.
+
 ## Agent Rails Contract
 
 ### Trigger Matrix

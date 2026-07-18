@@ -96,9 +96,17 @@ Agent Rails is a personal local kit. The milestones below track the main capabil
 - Added Related Test Selection for refactor-slice feedback while retaining the 172-entry full regression gate.
 - Completed the 0.6.1 release candidate gate: all regressions passed, deterministic assets and checksum were verified, the cold-start installer switched versioned directories correctly, and OpenCode completed a clean install/uninstall/reinstall/update/doctor/Task Pack smoke in a real Target Project.
 
+## 0.7.0 - Coding-Agent Evidence, Repair, And Task Models
+
+- Added bounded Code Evidence to clean and dirty Task Packs, with implementation and verification role pairing, a small untouched complement, and capped Git I/O.
+- Added a redacted, failure-aware Repair Pack and a private verification failure protocol that adapts retry guidance without changing child exit semantics.
+- Added deterministic Task Models with behavior invariants, plans, acceptance criteria, boundaries, and explicit open assumptions derived from frozen Pack evidence.
+- Added private Memory Candidates for verified repairs; drafts remain review-only, contain no raw failure output or Profile command bodies, and never auto-write Local Brain memory.
+- Recorded the staged coding-agent and Local Brain learning roadmaps, leaving model-aware routing, curator promotion, and paired evaluation as measured follow-up work.
+
 ## Near-Term Backlog
 
-- Continue the developer-first coding-agent roadmap recorded in [Coding Agent Evolution](./coding-agent-evolution.zh-CN.md): Task Code Evidence, Repair Pack, task decomposition, model-aware routing, and verified Memory Candidates.
+- Continue the developer-first coding-agent roadmap recorded in [Coding Agent Evolution](./coding-agent-evolution.zh-CN.md): evaluate Task Model quality, add model-aware routing, and measure curator promotion plus verified Memory Candidate reuse.
 - After the Local Brain runtime and trace schema stabilize, build the offline [Local Brain Learning Loop](./local-brain-design.zh-CN.md): redacted traces first, then SFT/LoRA, DPO, and only later GRPO/RLVR, with quantized MLX models promoted through explicit offline, shadow, and assist gates.
 - Run one real OpenCode `off` versus `rails-lite` A/B fixture and record the non-sensitive summary.
 - Add a clearer repair command or doctor warning for stale adapter profile paths.

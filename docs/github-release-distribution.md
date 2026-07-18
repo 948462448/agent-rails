@@ -57,7 +57,7 @@ agent-rails upgrade self
 Install or roll back to an exact published version:
 
 ```bash
-agent-rails upgrade self --version 0.6.1
+agent-rails upgrade self --version 0.7.0
 ```
 
 `agent-rails update --tool claude|codex|opencode` is the wider project maintenance loop: kit update, source tests when running from a Git checkout, the selected tool's target-project Doctor, Adapter refresh, and final Doctor. In a Release Install it uses the verified archive path and skips the source-only test suite. Tool selection is mandatory so maintenance cannot silently refresh the wrong Adapter.
@@ -76,7 +76,7 @@ For local testing of uncommitted refactor files, use a separate output directory
 ```bash
 AGENT_RAILS_HOME="$PWD" \
   python3 -I scripts/agent-python-cli.py release-build \
-    --output dist/0.6.1-candidate \
+    --output dist/0.7.0-candidate \
     --include-worktree
 ```
 
@@ -92,8 +92,8 @@ Release automation is tag-driven and intentionally refuses ambiguous input:
 4. Create and push the exact version tag:
 
    ```bash
-   git tag -a v0.6.1 -m "Agent Rails 0.6.1"
-   git push origin v0.6.1
+   git tag -a v0.7.0 -m "Agent Rails 0.7.0"
+   git push origin v0.7.0
    ```
 
 The workflow requires the tag to equal `v<VERSION>`, requires the tagged commit to be contained in `origin/main`, reruns the full tests, rebuilds and verifies the assets, then publishes the GitHub Release with generated notes.

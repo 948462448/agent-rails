@@ -54,6 +54,7 @@ class RenderedPackSections:
 
     git_evidence: str
     project_docs_entry: str
+    task_model: str
     agent_contract: str
     subagent_contract: str
     project_configuration: str
@@ -114,8 +115,9 @@ def render_task_pack(request: TaskPackRenderRequest) -> str:
             section_values[3],
             section_values[4],
             section_values[5],
+            section_values[6],
             verification,
-            section_values[7],
+            section_values[8],
         )
     )
     _strict_utf8(content)
@@ -369,6 +371,7 @@ def _section_values(sections: RenderedPackSections) -> Tuple[str, ...]:
     values = (
         sections.git_evidence,
         sections.project_docs_entry,
+        sections.task_model,
         sections.agent_contract,
         sections.subagent_contract,
         sections.project_configuration,
@@ -379,6 +382,7 @@ def _section_values(sections: RenderedPackSections) -> Tuple[str, ...]:
     names = (
         "git evidence",
         "project docs entry",
+        "task model",
         "agent contract",
         "subagent contract",
         "project configuration",

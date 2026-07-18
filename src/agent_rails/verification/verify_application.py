@@ -25,6 +25,12 @@ from agent_rails.git.scope import (
     fingerprint_git_worktree,
     resolve_git_head,
 )
+from agent_rails.memory.candidate import (
+    MemoryCandidateError,
+    MemoryCandidateRequest,
+    MemoryCandidateResult,
+    publish_memory_candidate,
+)
 
 from .check_application import (
     CHECK_PROFILE_VARIABLES,
@@ -41,9 +47,11 @@ from .check_application import (
 )
 from .plan import VerificationPlanError
 from .failure_protocol import (
+    FailureHistory,
     clear_failure_history,
     failure_history_path,
     observe_failure,
+    read_failure_history,
 )
 from .repair_pack import RepairPackRequest, render_repair_pack
 from .publish_check import (
@@ -128,6 +136,7 @@ class VerifyResult:
     print_only: bool
     check_execution: CheckExecutionResult
     publish_result: Optional[PublishCheckResult]
+    memory_candidate: Optional[MemoryCandidateResult]
     exit_code: int
     events: Tuple[VerifyEvent, ...]
 
@@ -288,6 +297,11 @@ def run_verify(
             events,
         )
 
+    prior_failure = None
+    if not request.print_only and isinstance(prepared, PreparedCheck):
+        prior_failure = read_failure_history(
+            history_path, prepared.target_sha or "non-git"
+        )
     if not request.print_only:
         clear_failure_history(history_path)
 
@@ -348,6 +362,21 @@ def run_verify(
         out.write("\nAgent Rails publish verification complete.\n")
     else:
         out.write("\nAgent Rails verification complete.\n")
+    memory_candidate = _publish_verified_memory_candidate(
+        request=request,
+        kit_home=kit_home,
+        environment=execution_environment,
+        context=context,
+        prepared=prepared,
+        check_execution=check_execution,
+        prior_failure=prior_failure,
+    )
+    if memory_candidate is not None:
+        out.write(
+            "Memory Candidate: "
+            f"{_terminal_literal(str(memory_candidate.path))}\n"
+        )
+        out.write("Curate explicitly; no local memory card was written.\n")
     out.flush()
     err.flush()
     return _result(
@@ -357,6 +386,7 @@ def run_verify(
         publish_result,
         0,
         events,
+        memory_candidate=memory_candidate,
     )
 
 
@@ -373,6 +403,47 @@ def _failure_history_path(
     try:
         return failure_history_path(config_home, context.root)
     except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _publish_verified_memory_candidate(
+    *,
+    request: VerifyRequest,
+    kit_home: Path,
+    environment: Mapping[str, str],
+    context: TargetProjectContext,
+    prepared: object,
+    check_execution: CheckExecutionResult,
+    prior_failure: Optional[FailureHistory],
+) -> Optional[MemoryCandidateResult]:
+    if (
+        request.print_only
+        or not isinstance(prepared, PreparedCheck)
+        or prior_failure is None
+        or not prepared.target_sha
+        or check_execution.completed_steps < 1
+    ):
+        return None
+    fingerprint = getattr(prior_failure, "fingerprint", "")
+    count = getattr(prior_failure, "consecutive_count", 0)
+    try:
+        config_home = Path(
+            AgentRailsPaths.from_environment(kit_home, environment).config_home
+        )
+        return publish_memory_candidate(
+            MemoryCandidateRequest(
+                config_home=config_home,
+                project_root=context.root,
+                project_name=context.project_name,
+                target_sha=prepared.target_sha,
+                failure_fingerprint=fingerprint,
+                failure_count=count,
+                changed_paths=prepared.changed_paths,
+                verification=prepared.plan,
+                completed_steps=check_execution.completed_steps,
+            )
+        )
+    except (MemoryCandidateError, OSError, UnicodeError, ValueError):
         return None
 
 
@@ -419,6 +490,7 @@ def _result(
     publish_result: Optional[PublishCheckResult],
     exit_code: int,
     events: list[VerifyEvent],
+    memory_candidate: Optional[MemoryCandidateResult] = None,
 ) -> VerifyResult:
     return VerifyResult(
         project_root=context.root,
@@ -427,6 +499,7 @@ def _result(
         print_only=request.print_only,
         check_execution=check_execution,
         publish_result=publish_result,
+        memory_candidate=memory_candidate,
         exit_code=exit_code,
         events=tuple(events),
     )

@@ -26,6 +26,11 @@ from agent_rails.context.memory_evidence import (
     render_memory_sections,
 )
 from agent_rails.context.pack_policy import PackPolicy, PackPolicyInput, resolve_pack_policy
+from agent_rails.context.task_model import (
+    TaskModelRequest,
+    build_task_model,
+    render_task_model,
+)
 from agent_rails.context.pack_renderer import (
     PackRendererError,
     RenderedPackSections,
@@ -43,6 +48,7 @@ from agent_rails.context.project_docs import (
 from agent_rails.core.paths import AgentRailsPaths
 from agent_rails.verification.plan import (
     VerificationCommands,
+    VerificationPlan,
     VerificationPlanRequest,
     build_verification_plan,
     render_suggestions,
@@ -374,6 +380,7 @@ def _generate_task_pack(request: PackApplicationRequest) -> PackApplicationResul
     memory_evidence = collect_memory_evidence(memory_request)
 
     verification_fallback_used = False
+    verification = VerificationPlan(steps=())
     try:
         verification = build_verification_plan(
             VerificationPlanRequest(
@@ -391,6 +398,17 @@ def _generate_task_pack(request: PackApplicationRequest) -> PackApplicationResul
         verification_fallback_used = True
         verification_suggestions = _VERIFICATION_FALLBACK
 
+    task_model = render_task_model(
+        build_task_model(
+            TaskModelRequest(
+                goal=request.goal,
+                changed_paths=change_evidence.changed_paths,
+                code_evidence=change_evidence.task_code_records,
+                verification=verification,
+            )
+        )
+    )
+
     render_request = TaskPackRenderRequest(
         goal=request.goal,
         display_path=output.display_path,
@@ -398,6 +416,7 @@ def _generate_task_pack(request: PackApplicationRequest) -> PackApplicationResul
         sections=RenderedPackSections(
             git_evidence=render_change_sections(change_evidence, change_request),
             project_docs_entry=render_entry_sections(project_docs),
+            task_model=task_model,
             agent_contract=contract_sections.agent_contract,
             subagent_contract=contract_sections.subagent_contract,
             project_configuration=render_configuration_section(project_docs),

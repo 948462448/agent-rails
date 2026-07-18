@@ -417,6 +417,8 @@ test_clean_pack_includes_task_code_evidence() {
     "fix session cookie validation" >/dev/null
 
   assert_file_contains "$output" "## Task Code Evidence"
+  assert_file_contains "$output" "## Task Model"
+  assert_file_contains "$output" "### Acceptance Criteria"
   assert_file_contains "$output" '`src/session_validator.py:1`'
   assert_file_contains "$output" 'symbol=`SessionValidator`'
   assert_file_contains "$output" '`tests/test_session_validator.py:3`'
@@ -932,6 +934,13 @@ test_python_pack_renderer_module() {
   (
     cd "$ROOT_DIR"
     python3 "$ROOT_DIR/tests/test_pack_renderer.py"
+  )
+}
+
+test_python_task_model_module() {
+  (
+    cd "$ROOT_DIR"
+    python3 "$ROOT_DIR/tests/test_task_model.py"
   )
 }
 
@@ -1470,6 +1479,7 @@ run_context_tests() {
   run_test test_python_project_docs_module "Python Task Pack Project Docs module"
   run_test test_python_contract_sections_module "Python Task Pack Contract Sections module"
   run_test test_python_pack_renderer_module "Python Final Task Pack Renderer module"
+  run_test test_python_task_model_module "Python Task Model module"
   run_test test_python_context_markdown_module "Python Task Pack Markdown Interface"
   run_test test_python_pack_application_module "Python Task Pack Application Service"
   run_test test_python_private_text_publisher_module "Python Private Text Publisher module"

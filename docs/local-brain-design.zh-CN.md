@@ -530,7 +530,7 @@ MiniCPM5 的 SFT/RL 路线与常见微调框架；[MLX-LM LoRA](https://github.c
 
 - 只从现有 Verification Plan 中推荐验证类别，不生成或执行命令；
 - 对 Rails 已安全选出的只读 Memory 卡片做相关性重排；
-- 仅在确定性验证成功后提出 Memory Candidate 信号，不调用写入 Interface；
+- 仅在确定性验证成功后提出或发布私有 Memory Candidate 草稿，不调用本地或在线 Memory 写入 Interface；
 - Memory Curator 和 Memory Suggest 继续拥有价值判断与显式本地写入。
 
 ### Slice 6：宿主能力快照与本地模型兼容性

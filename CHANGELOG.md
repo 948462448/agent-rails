@@ -1,5 +1,11 @@
 # Changelog
 
+## Project Conclusion - 2026-07-18
+
+- Archived Agent Rails as a failed experiment after VP-005 and VP-006 did not validate the core hypothesis that larger structured context improves coding-agent decisions.
+- Stopped feature development and new-adoption recommendations while preserving releases, tests, documentation, adapters, verification tooling, and external evaluation artifacts as historical evidence.
+- Recorded the evidence, limitations, retained engineering assets, and successor-project boundary in `PROJECT_STATUS.md`.
+
 ## 0.7.0 - 2026-07-18
 
 - Added an evidence-backed Task Model to every Task Pack: deterministic behavior invariants, change plan, acceptance criteria, boundaries, and explicit open assumptions now combine Goal, frozen Code Evidence, changed paths, and the shared Verification Plan without fabricating business semantics or root causes.

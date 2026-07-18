@@ -2,6 +2,8 @@
 
 [简体中文](./README.md) | [English](./README.en.md)
 
+> **Project status: failed experiment, concluded on 2026-07-18.** The core hypothesis did not survive real paired development evaluation. Feature development has stopped, and Agent Rails is not recommended for new adoption. The code, releases, and evaluation tooling remain as historical evidence. See [PROJECT_STATUS.md](./PROJECT_STATUS.md).
+
 Help your coding agent read the right project before it starts and run the right checks before delivery.
 
 Agent Rails is a personal, local guardrail for Claude Code, Codex, and OpenCode. Once connected, you keep talking to your agent normally—there is no new command set to memorize for daily work.

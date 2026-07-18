@@ -2,6 +2,8 @@
 
 [简体中文](./README.md) | [English](./README.en.md)
 
+> **项目状态：实验失败，已于 2026-07-18 结案。** Agent Rails 的核心假设没有通过真实 A/B 开发评测，现已停止功能开发，不建议在新项目中采用。代码、release 和评测工具仅作为历史证据保留。详见 [PROJECT_STATUS.md](./PROJECT_STATUS.md)。
+
 让 coding agent 在动手前读对项目、在交付前跑对检查。
 
 Agent Rails 是一套个人本地护栏，支持 Claude Code、Codex 和 OpenCode。接入以后，你仍然像平时一样和 agent 对话，不需要每天记住一组新命令。

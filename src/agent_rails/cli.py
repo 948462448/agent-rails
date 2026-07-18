@@ -1870,8 +1870,10 @@ def _task_pack(args: Sequence[str]) -> int:
                     tokenizer=values.get("tokenizer"),
                     tokenizer_command=values.get("tokenizer_command"),
                     tokenizer_path=values.get("tokenizer_path"),
-                    task_file=values.get("task_file"),
-                    rubric_file=values.get("rubric_file"),
+                    task_file=values.get("task_file")
+                    or os.environ.get("AGENT_RAILS_TASK_FILE"),
+                    rubric_file=values.get("rubric_file")
+                    or os.environ.get("AGENT_RAILS_RUBRIC_FILE"),
                 ),
                 environment=dict(os.environ),
             )

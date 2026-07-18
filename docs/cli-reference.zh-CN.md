@@ -61,6 +61,8 @@ agent-rails pack \
 
 显式文件会完整进入受保护的 Product Contract，并生成稳定的 `AC-*` / `RUB-*` 编号和 Acceptance Evidence Matrix。硬 token 预算不足以容纳完整合同时，`pack` 会失败，不会静默截断合同。如果目标声称存在“附件”或“冻结合同”却没有传入文件，`pack` 同样拒绝生成，避免 agent 在缺失需求时猜测。Profile 中配置的验证命令优先；未配置时，`pack` 会从项目结构探测建议命令，并在干净工作树中使用任务相关代码证据确定验证范围。
 
+OpenCode 等逐请求 Hook 会重复生成 Task Pack。启动 coding agent 进程时可设置 `AGENT_RAILS_TASK_FILE` 和 `AGENT_RAILS_RUBRIC_FILE`，让冻结合同在整个会话持续生效；命令行参数优先于同名环境变量。不要把这两个变量写进共享 Profile。
+
 ### `verify`
 
 ```bash

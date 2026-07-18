@@ -1017,6 +1017,31 @@ test_pack_contract_rules_cannot_forge_sections() {
   fi
 }
 
+test_pack_reads_contract_paths_from_request_environment() {
+  local repo="$TMP_ROOT/pack-contract-environment"
+  local task="$TMP_ROOT/pack-contract-environment-task.md"
+  local rubric="$TMP_ROOT/pack-contract-environment-rubric.md"
+  local output="$TMP_ROOT/pack-contract-environment-pack.md"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  printf '# temp\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git_commit "$repo" init
+  printf '# Frozen task\n\n- Preserve the picker fallback.\n' > "$task"
+  printf '# Frozen rubric\n\n- Missing fallback evidence caps the score.\n' > "$rubric"
+
+  AGENT_RAILS_TASK_FILE="$task" AGENT_RAILS_RUBRIC_FILE="$rubric" \
+    "$AGENT_RAILS_BIN" pack \
+      --project "$repo" \
+      --output "$output" \
+      "implement the frozen request-hook contract" >/dev/null
+
+  assert_file_contains "$output" "## Product Contract"
+  assert_file_contains "$output" "Preserve the picker fallback."
+  assert_file_contains "$output" "AC-001 [task] [Frozen task] Preserve the picker fallback."
+  assert_file_contains "$output" "RUB-001 [rubric] [Frozen rubric] Missing fallback evidence caps the score."
+}
+
 test_pack_token_budget_uses_token_assembler() {
   local repo="$TMP_ROOT/pack-token-assembler"
   local output="$TMP_ROOT/pack-token-assembler-task-pack.md"
@@ -1486,6 +1511,7 @@ run_context_tests() {
   run_test test_python_memory_suggestion_module "Python Memory Suggestion Application Service"
   run_test test_pack_does_not_expose_internal_bootstrap_overrides "pack keeps bootstrap configuration internal"
   run_test test_pack_contract_rules_cannot_forge_sections "pack contract rules cannot forge sections"
+  run_test test_pack_reads_contract_paths_from_request_environment "pack reads request-hook contract paths"
   run_test test_pack_token_budget_uses_token_assembler "pack token budget uses token assembler"
   run_test test_pack_tiny_token_budget_preserves_existing_complete_pack "pack tiny token budget preserves complete Pack"
   run_test test_pack_candidate_output_defers_hard_budget_to_request_hook "pack candidate output defers hard budget"

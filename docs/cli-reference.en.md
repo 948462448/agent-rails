@@ -61,6 +61,8 @@ Complex implementation and evaluation tasks should pass frozen task and rubric f
 
 Explicit files enter the protected Product Contract in full and produce stable `AC-*` / `RUB-*` identifiers plus an Acceptance Evidence Matrix. If a hard token budget cannot contain the complete contract, `pack` fails instead of silently truncating it. It also refuses to generate when the goal claims an attached or frozen contract but no file was supplied, preventing the agent from guessing missing requirements. Profile verification commands take precedence; otherwise `pack` detects suggestions from project structure and uses task-relevant code evidence to select a verification scope for a clean worktree.
 
+Per-request hooks such as OpenCode regenerate the Task Pack repeatedly. Set `AGENT_RAILS_TASK_FILE` and `AGENT_RAILS_RUBRIC_FILE` when starting the coding-agent process to keep the frozen contract active for the entire session; CLI options override the matching environment variables. Do not store these variables in a shared Profile.
+
 ### `verify`
 
 ```bash
